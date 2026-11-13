@@ -6,15 +6,19 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.security.MessageDigest
+import java.util.UUID
 
 /**
  * Runs one "Clean up dictation" request: prompt with People tags, call, validate.
  *
  * The server generates in a background job, and this class only asks for its state in short calls.
  * So there is no timeout that depends on how long the model needs, and the job carries on while
- * June is in the background or the screen is off. The job id is remembered: starting the same
- * cleanup again (after a lost connection, or after Android killed June) picks the running job up
- * instead of starting over.
+ * June is in the background or the screen is off, for minutes or for hours.
+ *
+ * Every cleanup gets a request id (a UUID) that June stores before it sends anything. The server
+ * treats that id as the identity of the generation: sending it again returns the same job, and the
+ * job is kept on the server's disk with a checkpoint. So the same text always leads back to the
+ * same generation, whether the answer got lost, June was killed, or the server itself restarted.
  */
 class DictationCleanup(
     private val client: LocalAiClient,
@@ -75,49 +79,72 @@ class DictationCleanup(
         val prompt = DictationPrompt.buildSystemPrompt(s.systemPromptTemplate, people)
         val fingerprint = fingerprint(prompt, body)
         val expected = expectedTokens(body)
-        var jobId: String? = null
-        try {
-            // 1. the same cleanup may still be running (or finished) on the server
-            s.pendingJobId?.takeIf { s.pendingJobFingerprint == fingerprint }?.let { pending ->
-                jobId = pending
-                when (val followed = follow(baseUrl, token, pending, expected, onProgress)) {
-                    Followed.Lost -> jobId = null
-                    is Followed.Ended -> return finish(followed.outcome, body, people)
-                }
-            }
 
-            // 2. start a new job
-            onProgress(Progress(Phase.Sending, expectedTokens = expected))
-            var submitted = client.submitCleanup(baseUrl, token, prompt, body, maxTokens(body))
-            if (submitted == LocalAiResult.TooLong) {
-                // the safety bound may be what does not fit: let the server use the room that is left
-                submitted = client.submitCleanup(baseUrl, token, prompt, body, null)
-            }
-            val submission =
-                when (submitted) {
-                    is LocalAiResult.Ok -> submitted.value
-                    else -> return finish(mapFailure(submitted), body, people)
-                }
-            return when (submission) {
-                is LocalAiSubmission.Finished -> finish(Ended.Text(submission.completion), body, people)
-                is LocalAiSubmission.Accepted -> {
-                    jobId = submission.job.id
-                    prefs.setPendingJob(submission.job.id, fingerprint)
-                    when (val followed = follow(baseUrl, token, submission.job.id, expected, onProgress, submission.job)) {
-                        Followed.Lost -> finish(Ended.Problem(Outcome.Stopped), body, people)
-                        is Followed.Ended -> finish(followed.outcome, body, people)
+        // June's own name for this cleanup. It is stored before anything is sent, so whatever
+        // happens next (answer lost, June frozen or killed, server restarted) the same text always
+        // leads back to the same generation.
+        val requestId =
+            s.pendingJobId?.takeIf { s.pendingJobFingerprint == fingerprint }
+                ?: newRequestId().also { prefs.setPendingJob(it, fingerprint) }
+        var onServer = false
+        try {
+            var bound: Int? = maxTokens(body)
+            var restarts = 0
+            while (true) {
+                onProgress(Progress(Phase.Sending, expectedTokens = expected))
+                val submission =
+                    when (val submitted = submit(baseUrl, token, prompt, body, bound, requestId)) {
+                        is LocalAiResult.Ok -> submitted.value
+                        LocalAiResult.TooLong ->
+                            if (bound != null) {
+                                // the safety bound may be what does not fit: use the room that is left
+                                bound = null
+                                continue
+                            } else {
+                                return finish(Ended.Problem(Outcome.TooLong), body, people, baseUrl, token, requestId)
+                            }
+                        else -> return finish(mapFailure(submitted), body, people, baseUrl, token, requestId)
+                    }
+                when (submission) {
+                    is LocalAiSubmission.Finished ->
+                        return finish(Ended.Text(submission.completion), body, people, baseUrl, token, null)
+                    is LocalAiSubmission.Accepted -> {
+                        onServer = true
+                        when (val followed = follow(baseUrl, token, requestId, expected, onProgress, submission.job)) {
+                            is Followed.Ended -> return finish(followed.outcome, body, people, baseUrl, token, requestId)
+                            // the server lost the job (its data was cleared): the same id starts it again
+                            Followed.Lost ->
+                                if (++restarts > MAX_RESTARTS) {
+                                    return finish(Ended.Problem(Outcome.Stopped), body, people, baseUrl, token, requestId)
+                                }
+                        }
                     }
                 }
             }
         } catch (e: CancellationException) {
             // the user pressed Cancel or left the editor: nobody wants the result any more
-            jobId?.let { id ->
-                withContext(NonCancellable) {
-                    prefs.setPendingJob(null, null)
-                    withTimeoutOrNull(CANCEL_TIMEOUT_MS) { client.cancelJob(baseUrl, token, id) }
-                }
+            withContext(NonCancellable) {
+                prefs.setPendingJob(null, null)
+                if (onServer) withTimeoutOrNull(CANCEL_TIMEOUT_MS) { client.cancelJob(baseUrl, token, requestId) }
             }
             throw e
+        }
+    }
+
+    /** Posting is safe to repeat (same request id), so a lost answer is simply asked for again. */
+    private suspend fun submit(
+        baseUrl: String,
+        token: String,
+        prompt: String,
+        body: String,
+        maxTokens: Int?,
+        requestId: String,
+    ): LocalAiResult<LocalAiSubmission> {
+        var attempt = 0
+        while (true) {
+            val r = client.submitCleanup(baseUrl, token, prompt, body, maxTokens, requestId)
+            if (r != LocalAiResult.TimedOut || ++attempt >= MAX_SUBMIT_ATTEMPTS) return r
+            delay(RETRY_DELAY_MS)
         }
     }
 
@@ -166,8 +193,11 @@ class DictationCleanup(
                 LocalAiResult.NotFound -> return Followed.Lost
                 LocalAiResult.Unauthorized -> return Followed.Ended(Ended.Problem(Outcome.NotPaired))
                 LocalAiResult.Unreachable -> {
-                    // nothing listens on the port: the server app was stopped or killed
-                    if (++refused >= MAX_REFUSED) return Followed.Ended(Ended.Problem(Outcome.ServerUnavailable))
+                    // Nothing listens on the port: the server app was stopped or killed. The job is
+                    // on its disk and continues when it runs again, so the id is kept.
+                    if (++refused >= MAX_REFUSED) {
+                        return Followed.Ended(Ended.Problem(Outcome.ServerUnavailable, keepJob = true))
+                    }
                     delay(RETRY_DELAY_MS)
                 }
                 else -> {
@@ -181,23 +211,44 @@ class DictationCleanup(
         }
     }
 
-    private fun finish(ended: Ended, body: String, people: List<String>): Outcome =
-        when (ended) {
-            is Ended.Problem -> {
-                if (!ended.keepJob) prefs.setPendingJob(null, null)
-                ended.outcome
+    /**
+     * Ends the run. Once June has the answer (or a final "no"), the server may forget the job:
+     * [ackId] is deleted there so the text does not stay on its disk.
+     */
+    private suspend fun finish(
+        ended: Ended,
+        body: String,
+        people: List<String>,
+        baseUrl: String,
+        token: String,
+        ackId: String?,
+    ): Outcome {
+        val keep = ended is Ended.Problem && ended.keepJob
+        if (!keep) {
+            prefs.setPendingJob(null, null)
+            if (ackId != null && (ended is Ended.Text || (ended as Ended.Problem).outcome.endedOnServer)) {
+                withContext(NonCancellable) { withTimeoutOrNull(CANCEL_TIMEOUT_MS) { client.cancelJob(baseUrl, token, ackId) } }
             }
+        }
+        return when (ended) {
+            is Ended.Problem -> ended.outcome
             is Ended.Text -> {
-                prefs.setPendingJob(null, null)
                 val result = OutputValidator.validate(ended.completion.text, people)
                 val changes =
                     if (ended.completion.finishReason == FINISH_LENGTH) result.changes + CHANGE_CUT_OFF else result.changes
                 if (result.text.isBlank()) Outcome.EmptyResult else Outcome.Rewrite(body, result.text, changes)
             }
         }
+    }
+
+    /** True for outcomes that came from a finished job, which then still has a row on the server. */
+    private val Outcome.endedOnServer: Boolean
+        get() = this is Outcome.Error || this == Outcome.TooLong || this == Outcome.NoModel || this == Outcome.Stopped || this == Outcome.EmptyResult
 
     private fun mapFailure(result: LocalAiResult<*>): Ended =
         Ended.Problem(
+            keepJob = result == LocalAiResult.Unreachable || result == LocalAiResult.TimedOut,
+            outcome =
             when (result) {
                 LocalAiResult.Unreachable, LocalAiResult.TimedOut -> Outcome.ServerUnavailable
                 LocalAiResult.Unauthorized -> Outcome.NotPaired
@@ -226,8 +277,11 @@ class DictationCleanup(
         /** Shown in the review when the model ran into the token limit. */
         const val CHANGE_CUT_OFF = "may be cut off at the end"
 
-        private const val MAX_REFUSED = 3
+        // about 15 seconds of "nothing listens": long enough for Android to restart the server
+        private const val MAX_REFUSED = 10
         private const val MAX_TIMEOUTS = 20
+        private const val MAX_SUBMIT_ATTEMPTS = 5
+        private const val MAX_RESTARTS = 2
         private const val RETRY_DELAY_MS = 1_500L
         private const val CANCEL_TIMEOUT_MS = 4_000L
 
@@ -239,6 +293,8 @@ class DictationCleanup(
          * It only stops a model that will not stop by itself.
          */
         fun maxTokens(body: String): Int = (body.length * 2 / 3 + 256).coerceIn(256, 8192)
+
+        fun newRequestId(): String = UUID.randomUUID().toString()
 
         fun fingerprint(systemPrompt: String, body: String): String =
             MessageDigest.getInstance("SHA-256")

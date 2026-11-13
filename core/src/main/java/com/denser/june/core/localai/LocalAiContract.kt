@@ -46,6 +46,11 @@ data class LocalAiChatRequest(
     @SerialName("chat_template_kwargs") val chatTemplateKwargs: Map<String, JsonElement>? = null,
     /** v2: answer `202` with a job and keep generating without this connection (§2.4). */
     val background: Boolean = false,
+    /**
+     * v2: June's own id for this request (a UUID). Sending the same id again returns the job that
+     * already exists, and the job can be asked for by this id.
+     */
+    @SerialName("request_id") val requestId: String? = null,
 )
 
 @Serializable
@@ -89,6 +94,7 @@ data class LocalAiJobProgress(
 data class LocalAiJob(
     val id: String,
     @SerialName("object") val obj: String = OBJECT,
+    @SerialName("request_id") val requestId: String? = null,
     val status: String = STATUS_QUEUED,
     @SerialName("queue_position") val queuePosition: Int? = null,
     val progress: LocalAiJobProgress = LocalAiJobProgress(),

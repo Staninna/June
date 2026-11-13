@@ -101,6 +101,8 @@ class LocalAiClient(
     /**
      * Sends the dictated [notes] with the [systemPrompt] as a background job. [maxTokens] bounds the
      * answer, so a model that does not stop cannot keep the phone busy for the whole context window.
+     * With a [requestId] the call is safe to repeat: the server answers with the job that already
+     * has this id (running or finished) instead of starting another one.
      */
     suspend fun submitCleanup(
         baseUrl: String,
@@ -108,6 +110,7 @@ class LocalAiClient(
         systemPrompt: String,
         notes: String,
         maxTokens: Int?,
+        requestId: String? = null,
     ): LocalAiResult<LocalAiSubmission> {
         val payload =
             LocalAiChatRequest(
@@ -116,6 +119,7 @@ class LocalAiClient(
                 stream = false,
                 chatTemplateKwargs = mapOf("enable_thinking" to JsonPrimitive(false)),
                 background = true,
+                requestId = requestId,
             )
         val request =
             Request.Builder()

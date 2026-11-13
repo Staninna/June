@@ -101,9 +101,10 @@ class DictationCleanupTest {
                     method == "POST" -> {
                         assertTrue(requestBody.contains("\"background\":true"))
                         assertTrue(requestBody.contains("\"max_tokens\":${DictationCleanup.maxTokens(body)}"))
+                        assertTrue("a request id is sent", Regex("\"request_id\":\"[0-9a-f-]{36}\"").containsMatchIn(requestBody))
                         202 to job("queued", ""","queue_position":1""")
                     }
-                    path.startsWith("/v1/jobs/chatcmpl-1") ->
+                    path.startsWith("/v1/jobs/") ->
                         when (++polls) {
                             1 -> 200 to job("loading_model")
                             2 -> 200 to job("processing_prompt", ""","progress":{"prompt_tokens":900,"prompt_tokens_processed":450}""")
@@ -143,52 +144,76 @@ class DictationCleanupTest {
     }
 
     @Test
-    fun `picks up the job that was running when June went away, without sending the entry again`() = runBlocking {
+    fun `the same entry leads back to the same generation after June went away`() = runBlocking {
+        val posts = CopyOnWriteArrayList<String>()
         val s =
-            TinyServer { method, _, _ ->
-                if (method == "GET") 200 to job("completed", ""","response":${completion("Good morning, world!")}""")
-                else 500 to "{}"
+            TinyServer { method, _, requestBody ->
+                if (method == "POST") posts += requestBody
+                // the server knows the id: it answers with the job that is already finished
+                200 to job("completed", ""","response":${completion("Good morning, world!")}""")
             }
                 .also { server = it }
         val store = store(s)
         val prompt = DictationPrompt.buildSystemPrompt(store.current.systemPromptTemplate, emptyList())
-        store.setPendingJob("chatcmpl-1", DictationCleanup.fingerprint(prompt, body))
+        store.setPendingJob("11111111-2222-3333-4444-555555555555", DictationCleanup.fingerprint(prompt, body))
 
         val outcome = DictationCleanup(LocalAiClient(), store).run(body, emptyList())
         assertEquals("Good morning, world!", (outcome as DictationCleanup.Outcome.Rewrite).rewrite)
-        assertTrue("no new job may be started", s.requests.none { it.startsWith("POST") })
+        assertEquals(1, posts.size)
+        assertTrue("the stored id is used again", posts[0].contains("\"request_id\":\"11111111-2222-3333-4444-555555555555\""))
+        assertTrue("the result is acknowledged", s.requests.contains("DELETE /v1/jobs/11111111-2222-3333-4444-555555555555"))
         assertNull(store.current.pendingJobId)
     }
 
     @Test
-    fun `a remembered job for a different text, or one the server forgot, starts a new one`() = runBlocking {
-        var posts = 0
+    fun `another entry gets a new id, and a job the server lost is started again under the same id`() = runBlocking {
+        val posts = CopyOnWriteArrayList<String>()
+        var gets = 0
         val s =
-            TinyServer { method, path, _ ->
-                when {
-                    method == "POST" -> {
-                        posts++
-                        202 to job("queued").replace("chatcmpl-1", "chatcmpl-2")
+            TinyServer { method, _, requestBody ->
+                when (method) {
+                    "POST" -> {
+                        posts += requestBody
+                        202 to job("queued")
                     }
-                    path.startsWith("/v1/jobs/chatcmpl-2") ->
-                        200 to job("completed", ""","response":${completion("New.")}""").replace("\"chatcmpl-1\",\"object\":\"chat.completion.job\"", "\"chatcmpl-2\",\"object\":\"chat.completion.job\"")
-                    else -> 404 to """{"error":{"message":"Unknown job","type":"invalid_request_error","code":"not_found"}}"""
+                    "GET" ->
+                        if (++gets == 1) 404 to """{"error":{"message":"Unknown job","type":"invalid_request_error","code":"not_found"}}"""
+                        else 200 to job("completed", ""","response":${completion("New.")}""")
+                    else -> 200 to job("completed")
                 }
             }
                 .also { server = it }
         val store = store(s)
-        val prompt = DictationPrompt.buildSystemPrompt(store.current.systemPromptTemplate, emptyList())
+        store.setPendingJob("99999999-2222-3333-4444-555555555555", "the fingerprint of some other entry")
 
-        // same text, but the server restarted and lost the job
-        store.setPendingJob("chatcmpl-1", DictationCleanup.fingerprint(prompt, body))
-        assertEquals("New.", (DictationCleanup(LocalAiClient(), store).run(body, emptyList()) as DictationCleanup.Outcome.Rewrite).rewrite)
-        assertEquals(1, posts)
+        val outcome = DictationCleanup(LocalAiClient(), store).run(body, emptyList())
+        assertEquals("New.", (outcome as DictationCleanup.Outcome.Rewrite).rewrite)
+        assertTrue("the old id belongs to another text", posts.none { it.contains("99999999") })
+        assertEquals("posted again after the server lost the job", 2, posts.size)
+        val ids = posts.map { Regex("\"request_id\":\"([0-9a-f-]{36})\"").find(it)!!.groupValues[1] }
+        assertEquals(ids[0], ids[1])
+    }
 
-        // another text: the old job is not asked for at all
-        store.setPendingJob("chatcmpl-1", "some other fingerprint")
-        s.requests.clear()
-        DictationCleanup(LocalAiClient(), store).run(body, emptyList())
-        assertTrue(s.requests.none { it.contains("chatcmpl-1") })
+    @Test
+    fun `a server that is not running keeps the id, so the next try continues the same generation`() = runBlocking {
+        val port = ServerSocket(0).use { it.localPort }
+        val store = Store(LocalAiSettings(enabled = true, token = "sk-local-test", baseUrl = "http://127.0.0.1:$port"))
+        assertEquals(DictationCleanup.Outcome.ServerUnavailable, DictationCleanup(LocalAiClient(), store).run(body, emptyList()))
+        val id = store.current.pendingJobId
+        assertTrue(id != null)
+
+        // the server is back (on the address June knows) and still has the job
+        val posts = CopyOnWriteArrayList<String>()
+        val s =
+            TinyServer { method, _, requestBody ->
+                if (method == "POST") posts += requestBody
+                200 to job("completed", ""","response":${completion("Back.")}""")
+            }
+                .also { server = it }
+        store.current = store.current.copy(baseUrl = s.baseUrl)
+        val outcome = DictationCleanup(LocalAiClient(), store).run(body, emptyList())
+        assertEquals("Back.", (outcome as DictationCleanup.Outcome.Rewrite).rewrite)
+        assertTrue(posts.single().contains("\"request_id\":\"$id\""))
     }
 
     @Test
@@ -209,7 +234,7 @@ class DictationCleanupTest {
         val running = CoroutineScope(Dispatchers.Default).async { DictationCleanup(LocalAiClient(), store).run(body, emptyList()) }
         withTimeout(5_000) { while (s.requests.none { it.startsWith("GET") }) delay(10) }
         running.cancelAndJoin()
-        withTimeout(5_000) { while (s.requests.none { it.startsWith("DELETE /v1/jobs/chatcmpl-1") }) delay(10) }
+        withTimeout(5_000) { while (s.requests.none { it.startsWith("DELETE /v1/jobs/") }) delay(10) }
         assertNull(store.current.pendingJobId)
     }
 
