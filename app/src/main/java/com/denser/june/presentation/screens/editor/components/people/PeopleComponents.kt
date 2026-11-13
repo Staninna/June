@@ -56,6 +56,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.toShape
@@ -736,7 +737,7 @@ fun PersonDetailSheet(
                 focusedIndicatorColor = Color.Transparent,
                 unfocusedIndicatorColor = Color.Transparent,
             )
-            OutlinedTextField(
+            TextField(
                 value = name,
                 onValueChange = { name = it.take(60) },
                 label = { Text(stringResource(R.string.people_name)) },
@@ -747,7 +748,7 @@ fun PersonDetailSheet(
                 modifier = Modifier.fillMaxWidth()
             )
             Spacer(Modifier.height(10.dp))
-            OutlinedTextField(
+            TextField(
                 value = note,
                 onValueChange = { note = it.take(80) },
                 label = { Text(stringResource(R.string.people_note)) },
