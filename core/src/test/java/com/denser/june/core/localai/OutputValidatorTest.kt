@@ -133,4 +133,35 @@ class OutputValidatorTest {
         assertTrue(matches.all { it.groupValues[3] in people })
         assertFalse(out.contains("**"))
     }
+
+    @Test
+    fun `topic tags survive, written as codes or as plain tags`() {
+        val topics = mapOf("#awake" to "awake", "#zininin" to "zininin")
+        val r = OutputValidator.validate("Good morning.\n\n#awake #zininin", listOf("Emma"), topics = topics)
+        assertEquals("Good morning.\n\n[#awake](topic:awake) [#zininin](topic:zininin)", r.text)
+        assertTrue(r.changes.none { it.contains("square brackets") })
+
+        val kept = OutputValidator.validate("Good morning.\n\n[#awake](topic:awake) [#zininin](topic:zininin)", emptyList())
+        assertEquals("Good morning.\n\n[#awake](topic:awake) [#zininin](topic:zininin)", kept.text)
+
+        // a tag that was not in the entry stays a plain word, and a longer word is not cut
+        val other = OutputValidator.validate("#awakening and #other", emptyList(), topics = topics)
+        assertEquals("#awakening and #other", other.text)
+    }
+
+    @Test
+    fun `simple at-tags come back as codes, also names of several words`() {
+        val r = OutputValidator.validate("Out with @Emma and @Sam de Vries, later @Nobody.", listOf("Emma", "Sam de Vries"))
+        assertEquals("Out with [@Emma](person:Emma) and [@Sam de Vries](person:Sam de Vries), later Nobody.", r.text)
+    }
+
+    @Test
+    fun `an entry goes to the model and comes back with its markup intact`() {
+        val entry = "Movie with [@Emma](person:Emma) *tonight*.\n\n[#carnaval](topic:carnaval) "
+        val s = DictationPrompt.simplify(entry)
+        // a model that returns the notes unchanged
+        val r = OutputValidator.validate(s.text, listOf("Emma"), topics = s.topics)
+        assertEquals(entry.trim(), r.text)
+        assertTrue(r.changes.isEmpty())
+    }
 }

@@ -61,7 +61,9 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.material3.LinearWavyProgressIndicator
+import androidx.compose.material3.SheetValue
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import com.denser.june.core.localai.DictationCleanup
 import kotlinx.coroutines.delay
@@ -91,7 +93,14 @@ fun CleanupReviewSheet(
     onOpenSettings: () -> Unit,
 ) {
     if (state is CleanupUiState.Hidden) return
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    // A tap next to the sheet, a swipe down or Back must not throw away a running or finished
+    // cleanup: while there is something to lose, only the buttons close the sheet.
+    val current by rememberUpdatedState(state)
+    val sheetState =
+        rememberModalBottomSheetState(
+            skipPartiallyExpanded = true,
+            confirmValueChange = { target -> target != SheetValue.Hidden || current is CleanupUiState.Problem },
+        )
     val maxHeight = (LocalConfiguration.current.screenHeightDp * 0.62f).dp
 
     ModalBottomSheet(

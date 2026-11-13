@@ -154,7 +154,7 @@ class DictationCleanupTest {
             }
                 .also { server = it }
         val store = store(s)
-        val prompt = DictationPrompt.buildSystemPrompt(store.current.systemPromptTemplate, emptyList())
+        val prompt = DictationPrompt.buildSystemPrompt(store.current.systemPromptTemplate, emptyList(), body)
         store.setPendingJob("11111111-2222-3333-4444-555555555555", DictationCleanup.fingerprint(prompt, body))
 
         val outcome = DictationCleanup(LocalAiClient(), store).run(body, emptyList())
@@ -306,5 +306,50 @@ class DictationCleanupTest {
         assertEquals(256 + 800, DictationCleanup.maxTokens("x".repeat(1200)))
         assertEquals(8192, DictationCleanup.maxTokens("x".repeat(100_000)))
         assertEquals(400, DictationCleanup.expectedTokens("x".repeat(1200)))
+    }
+
+    @Test
+    fun `the model sees simple tags and the review gets June's codes back`() = runBlocking {
+        val sent = CopyOnWriteArrayList<String>()
+        val s =
+            TinyServer { method, _, requestBody ->
+                if (method == "POST") {
+                    sent += requestBody
+                    202 to job("queued")
+                } else {
+                    200 to job("completed", ""","progress":{"prompt_tokens":600},"response":${completion("Out with @Emma.\\n\\n#carnaval")}""")
+                }
+            }
+                .also { server = it }
+        val entry = "so uh out with [@Emma](person:Emma)\n\n[#carnaval](topic:carnaval) "
+        val outcome = DictationCleanup(LocalAiClient(), store(s)).run(entry, listOf("Emma")) as DictationCleanup.Outcome.Rewrite
+        assertFalse("no link codes go to the model", sent.single().contains("person:") || sent.single().contains("topic:"))
+        assertTrue(sent.single().contains("@Emma") && sent.single().contains("#carnaval"))
+        assertTrue("the topic rule is only there because the entry has a tag", sent.single().contains("topic tags"))
+        assertEquals("Out with [@Emma](person:Emma).\n\n[#carnaval](topic:carnaval)", outcome.rewrite)
+        assertEquals(entry, outcome.original)
+    }
+
+    @Test
+    fun `the write bar is measured against the entry's share of the prompt`() = runBlocking {
+        var polls = 0
+        val s =
+            TinyServer { method, _, _ ->
+                when {
+                    method == "POST" -> 202 to job("queued")
+                    method == "GET" && ++polls == 1 ->
+                        200 to job("generating", ""","progress":{"prompt_tokens":1000,"prompt_tokens_processed":1000,"completion_tokens":20}""")
+                    else -> 200 to job("completed", ""","response":${completion("Done.")}""")
+                }
+            }
+                .also { server = it }
+        val store = store(s)
+        val seen = mutableListOf<DictationCleanup.Progress>()
+        DictationCleanup(LocalAiClient(), store).run(body, emptyList()) { seen += it }
+        val writing = seen.single { it.phase == DictationCleanup.Phase.Writing }
+        val prompt = DictationPrompt.buildSystemPrompt(store.current.systemPromptTemplate, emptyList(), body)
+        val expected = (1000.0 * body.length / (prompt.length + body.length)).toInt()
+        assertEquals(expected, writing.expectedTokens)
+        assertEquals(20f / expected, writing.fraction!!, 0.001f)
     }
 }
