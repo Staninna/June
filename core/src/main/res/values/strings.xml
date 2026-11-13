@@ -782,8 +782,9 @@
     <string name="cleanup_button_problem">Cleanup failed. Show why</string>
     <string name="cleanup_pill_reading">Reading</string>
     <string name="cleanup_pill_writing">Writing</string>
-    <string name="cleanup_pill_working_hint">Cleaning up an entry</string>
-    <string name="cleanup_pill_ready_hint">Tap to review</string>
+    <string name="cleanup_pill_starting">Starting</string>
+    <string name="cleanup_pill_queued">In line</string>
+    <string name="cleanup_pill_loading">Loading</string>
     <string name="cleanup_phase_queued">Waiting in line…</string>
     <string name="cleanup_phase_loading">Loading the model…</string>
     <string name="cleanup_phase_reading">Reading your entry…</string>

@@ -9,7 +9,6 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.imePadding
@@ -62,7 +61,7 @@ fun CleanupPill(snapshot: CleanupSession.Snapshot, onClick: () -> Unit, modifier
             tonalElevation = 6.dp,
         ) {
             Row(
-                Modifier.padding(start = 12.dp, end = 18.dp, top = 10.dp, bottom = 10.dp)
+                Modifier.padding(start = 8.dp, end = 14.dp, top = 8.dp, bottom = 8.dp)
                     .semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -88,16 +87,9 @@ fun CleanupPill(snapshot: CleanupSession.Snapshot, onClick: () -> Unit, modifier
                         modifier = Modifier.size(if (ready) 22.dp else 14.dp),
                     )
                 }
-                Spacer(Modifier.width(10.dp))
-                Column {
-                    AnimatedContent(pillTitle(snapshot.state), transitionSpec = { fadeIn() togetherWith fadeOut() }, label = "pillTitle") { title ->
-                        Text(title, style = MaterialTheme.typography.labelLarge)
-                    }
-                    Text(
-                        stringResource(if (ready) R.string.cleanup_pill_ready_hint else R.string.cleanup_pill_working_hint),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = (if (ready) scheme.onPrimary else scheme.onSurfaceVariant).copy(alpha = 0.85f),
-                    )
+                Spacer(Modifier.width(8.dp))
+                AnimatedContent(pillTitle(snapshot.state), transitionSpec = { fadeIn() togetherWith fadeOut() }, label = "pillTitle") { title ->
+                    Text(title, style = MaterialTheme.typography.labelLarge, maxLines = 1)
                 }
             }
         }
@@ -112,9 +104,9 @@ private fun pillTitle(state: CleanupUiState): String =
             val p = state.progress
             val percent = p.fraction?.let { " " + stringResource(R.string.cleanup_detail_percent, (it * 100).toInt()) }.orEmpty()
             when (p.phase) {
-                DictationCleanup.Phase.Sending -> stringResource(R.string.cleanup_working)
-                DictationCleanup.Phase.Queued -> stringResource(R.string.cleanup_phase_queued)
-                DictationCleanup.Phase.LoadingModel -> stringResource(R.string.cleanup_phase_loading)
+                DictationCleanup.Phase.Sending -> stringResource(R.string.cleanup_pill_starting)
+                DictationCleanup.Phase.Queued -> stringResource(R.string.cleanup_pill_queued)
+                DictationCleanup.Phase.LoadingModel -> stringResource(R.string.cleanup_pill_loading)
                 DictationCleanup.Phase.Reading -> stringResource(R.string.cleanup_pill_reading) + percent
                 DictationCleanup.Phase.Writing -> stringResource(R.string.cleanup_pill_writing) + percent
             }
