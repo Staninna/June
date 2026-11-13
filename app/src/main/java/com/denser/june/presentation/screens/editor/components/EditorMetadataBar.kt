@@ -21,6 +21,8 @@ fun EditorMetadataBar(
     compactFormattedDate: String? = null,
     formattedTime: String?,
     tagCount: Int,
+    peopleCount: Int = 0,
+    onPeopleClick: () -> Unit = {},
     onEmojiClick: () -> Unit,
     onDatePickerOpen: () -> Unit,
     onTimePickerOpen: () -> Unit,
@@ -78,6 +80,13 @@ fun EditorMetadataBar(
                         isActive = emoji != null,
                         activeContainerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.4f),
                         activeContentColor = MaterialTheme.colorScheme.tertiary
+                    ),
+                    ConnectedBarAction(
+                        iconRes = if (peopleCount > 0) R.drawable.groups_24px_fill else R.drawable.groups_24px,
+                        label = if (peopleCount > 0) peopleCount.toString() else null,
+                        contentDescriptionRes = R.string.people,
+                        onClick = onPeopleClick,
+                        isActive = peopleCount > 0
                     ),
                     ConnectedBarAction(
                         iconRes = if (tagCount > 0) R.drawable.sell_24px_fill else R.drawable.sell_24px,

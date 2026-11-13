@@ -116,6 +116,14 @@ class FakeJournalRepository : JournalRepository {
                 .filter { it.startsWith(query, ignoreCase = true) }
                 .distinct()
         }
+    override fun getKnownPeople(): Flow<List<com.denser.june.core.domain.model.JournalPerson>> =
+        _journalFlow.map { list ->
+            list.filter { !it.isLocked && it.deletedAt == null }
+                .sortedByDescending { it.dateTime }
+                .flatMap { it.people }
+                .distinctBy { it.identityKey }
+        }
+
     override fun getUniqueTags(): Flow<List<String>> =
         _journalFlow.map { list ->
             list.filter { !it.isLocked }

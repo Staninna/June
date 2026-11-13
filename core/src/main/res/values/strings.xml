@@ -649,4 +649,37 @@
     <string name="move_down">Move down</string>
     <string name="clear_filters">Clear filters</string>
     <string name="vault_no_lock_warning">No Vault lock set</string>
+
+    <!-- People -->
+    <string name="people">People</string>
+    <string name="people_with">With</string>
+    <string name="people_sheet_title">Who was there?</string>
+    <string name="people_sheet_subtitle">Add the people who made this moment. Everything stays on your device.</string>
+    <string name="people_search_hint">Type a name</string>
+    <string name="people_add_name">Add “%1$s”</string>
+    <string name="people_from_contacts">Choose from contacts</string>
+    <string name="people_recent">Recent</string>
+    <string name="people_in_entry">In this entry</string>
+    <string name="people_empty_recent">People you add will show up here for quick access next time</string>
+    <string name="people_no_match">No one matches “%1$s” yet</string>
+    <string name="people_add">Add people</string>
+    <string name="people_edit">Edit person</string>
+    <string name="people_name">Name</string>
+    <string name="people_note">Context</string>
+    <string name="people_note_placeholder">e.g. Sister, climbing buddy, new colleague</string>
+    <string name="people_note_suggestions">Quick context</string>
+    <string name="people_note_family">Family</string>
+    <string name="people_note_friend">Friend</string>
+    <string name="people_note_partner">Partner</string>
+    <string name="people_note_colleague">Colleague</string>
+    <string name="people_note_new">Just met</string>
+    <string name="people_linked_contact">Linked to a contact</string>
+    <string name="people_linked_contact_desc">Tap to open in your contacts app</string>
+    <string name="people_link_contact">Link to a contact</string>
+    <string name="people_link_contact_desc">Pick the matching person from your address book</string>
+    <string name="people_unlink">Unlink</string>
+    <string name="people_remove">Remove from entry</string>
+    <string name="people_contact_unavailable">Couldn’t open this contact</string>
+    <string name="people_count">%1$d people</string>
+    <string name="people_selected">Added</string>
 </resources>

@@ -25,6 +25,10 @@ sealed interface EditorAction {
     data class UpdateTags(val tags: List<String>) : EditorAction
     data class SearchTags(val query: String) : EditorAction
 
+    data class AddPerson(val person: com.denser.june.core.domain.model.JournalPerson) : EditorAction
+    data class UpdatePerson(val person: com.denser.june.core.domain.model.JournalPerson) : EditorAction
+    data class RemovePerson(val id: String) : EditorAction
+
     data class SetJournalFont(
         val fontName: String?,
         val variation: FontVariationConfig? = null

@@ -47,6 +47,8 @@ class EditorDialogState {
     var showCameraSelectionDialog by mutableStateOf(false)
     var showLocationDialog by mutableStateOf(false)
     var showTagsDialog by mutableStateOf(false)
+    var showPeopleSheet by mutableStateOf(false)
+    var editingPerson by mutableStateOf<com.denser.june.core.domain.model.JournalPerson?>(null)
     var showPlusSaveDialog by mutableStateOf(false)
     var onPlusSaveExitAfter by mutableStateOf(false)
     var journalToExport by mutableStateOf<Journal?>(null)
@@ -311,6 +313,29 @@ fun EditorModals(
         )
     }
 
+    if (dialogState.showPeopleSheet) {
+        com.denser.june.presentation.screens.editor.components.people.PeoplePickerSheet(
+            selected = editorState.people,
+            known = editorState.knownPeople,
+            onAdd = { onAction(EditorAction.AddPerson(it)) },
+            onRemove = { onAction(EditorAction.RemovePerson(it.id)) },
+            onPersonClick = {
+                dialogState.showPeopleSheet = false
+                dialogState.editingPerson = it
+            },
+            onDismiss = { dialogState.showPeopleSheet = false }
+        )
+    }
+
+    dialogState.editingPerson?.let { person ->
+        com.denser.june.presentation.screens.editor.components.people.PersonDetailSheet(
+            person = person,
+            onSave = { onAction(EditorAction.UpdatePerson(it)) },
+            onRemove = { onAction(EditorAction.RemovePerson(it.id)) },
+            onDismiss = { dialogState.editingPerson = null }
+        )
+    }
+
     ExportJournalSheet(
         journal = dialogState.journalToExport,
         onDismiss = { dialogState.journalToExport = null }
@@ -327,6 +352,7 @@ fun EditorModals(
                 location = editorState.location,
                 songDetails = editorState.songDetails,
                 tags = editorState.tags,
+                people = editorState.people,
                 createdAt = editorState.createdAt,
                 updatedAt = editorState.updatedAt,
                 dateTime = editorState.dateTime,

@@ -21,6 +21,8 @@ data class EditorState(
     val audios: List<com.denser.june.core.domain.model.JournalAudio> = emptyList(),
     val tags: List<String> = emptyList(),
     val tagSuggestions: List<String> = emptyList(),
+    val people: List<com.denser.june.core.domain.model.JournalPerson> = emptyList(),
+    val knownPeople: List<com.denser.june.core.domain.model.JournalPerson> = emptyList(),
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long? = null,
     val dateTime: Long = getTodayAtMidnight(),
@@ -69,5 +71,6 @@ data class EditorState(
                 songDetails != null ||
                 audios.isNotEmpty() ||
                 location != null ||
-                tags.isNotEmpty()
+                tags.isNotEmpty() ||
+                people.isNotEmpty()
 }

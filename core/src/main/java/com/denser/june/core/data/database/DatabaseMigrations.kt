@@ -220,5 +220,21 @@ object DatabaseMigrations {
             )
         }
     }
+
+    val MIGRATION_7_8 = object : Migration(7, 8) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            AppLogger.d(
+                AppLogger.Category.DATABASE,
+                "DatabaseMigrations",
+                "Running database migration from version 7 to 8..."
+            )
+            db.execSQL("ALTER TABLE `journals` ADD COLUMN `people` TEXT NOT NULL DEFAULT '[]'")
+            AppLogger.d(
+                AppLogger.Category.DATABASE,
+                "DatabaseMigrations",
+                "Successfully completed database migration from version 7 to 8."
+            )
+        }
+    }
 }
 

@@ -111,6 +111,8 @@ class FakeJournalDao : JournalDao {
 
     override fun getAllUniqueTags(): Flow<List<String>> = flowOf(tags.toList())
 
+    override fun getAllPeopleJson(): Flow<List<String>> = flowOf(emptyList())
+
     override fun getAllTagCounts(): Flow<List<TagCount>> = flowOf(emptyList())
 
     override fun getJournalsWithAllTags(tags: List<String>, tagCount: Int): Flow<List<JournalEntity>> =

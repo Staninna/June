@@ -74,7 +74,9 @@ interface JournalDao {
             (location LIKE '%"address":"%' || :query || '%') OR
             (location LIKE '%"locality":"%' || :query || '%') OR
             (songDetails LIKE '%"title":"%' || :query || '%') OR
-            (songDetails LIKE '%"artistName":"%' || :query || '%')
+            (songDetails LIKE '%"artistName":"%' || :query || '%') OR
+            (people LIKE '%"name":"%' || :query || '%') OR
+            (people LIKE '%"note":"%' || :query || '%')
         )
         AND (:isBookmarked IS NULL OR isBookmarked = :isBookmarked)
         AND (:isDraft IS NULL OR isDraft = :isDraft)
@@ -179,6 +181,10 @@ interface JournalDao {
         ORDER BY j.dateTime DESC, j.createdAt DESC
     """)
     fun getJournalsWithAllTags(tags: List<String>, tagCount: Int): Flow<List<JournalEntity>>
+
+    /** Raw JSON people lists, newest entries first, used to build "recent people" suggestions. */
+    @Query("SELECT people FROM journals WHERE deletedAt IS NULL AND isLocked = 0 AND people != '[]' ORDER BY dateTime DESC, createdAt DESC")
+    fun getAllPeopleJson(): Flow<List<String>>
 
     @Query("SELECT * FROM journals WHERE deletedAt IS NULL AND isLocked = 1 ORDER BY dateTime DESC, createdAt DESC")
     fun getLockedJournals(): Flow<List<JournalEntity>>

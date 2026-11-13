@@ -93,6 +93,15 @@ fun JournalMetadataBadges(
             icon = R.drawable.location_on_24px
         )
         JuneBadge(
+            show = journal.people.isNotEmpty(),
+            icon = R.drawable.groups_24px,
+            label = when (journal.people.size) {
+                0 -> null
+                1 -> journal.people.first().name.substringBefore(' ').take(12)
+                else -> "${journal.people.size}"
+            }
+        )
+        JuneBadge(
             show = tagCount > 0,
             icon = R.drawable.sell_24px,
             label = "$tagCount"
