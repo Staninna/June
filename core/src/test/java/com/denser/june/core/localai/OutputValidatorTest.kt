@@ -164,4 +164,46 @@ class OutputValidatorTest {
         assertEquals(entry.trim(), r.text)
         assertTrue(r.changes.isEmpty())
     }
+
+    @Test
+    fun `every format of the editor passes through untouched`() {
+        val entry =
+            """
+            # Monday
+
+            **Bold**, *italic*, __underline__, ~~gone~~, ==marked== and `code`.
+
+            - milk
+              - oat milk
+            - [ ] call mum
+            - [x] pay rent
+            1. first
+            2. second
+
+            > a quote
+
+            ---
+
+            See [the site](https://example.org/a_b) and ![pic](photos/a.jpg) and ![[b.png]].
+
+            | a | b |
+            |---|---|
+            | 1 | 2 |
+            """.trimIndent()
+        val r = OutputValidator.validate(entry, listOf("Emma"), original = entry)
+        assertEquals(entry, r.text)
+        assertTrue("changed: ${r.changes}", r.changes.isEmpty())
+    }
+
+    @Test
+    fun `a heading the model invented is still removed`() {
+        val r = OutputValidator.validate("# My Day\n\nI went out.\n\n---\n\nNote: I fixed the punctuation.", emptyList(), original = "so i went out")
+        assertEquals("I went out.", r.text)
+    }
+
+    @Test
+    fun `a bold link keeps its emphasis, a bold mention loses it`() {
+        val r = OutputValidator.validate("Read **[this](https://example.org)** with **[@Emma](person:Emma)**.", listOf("Emma"))
+        assertEquals("Read **[this](https://example.org)** with [@Emma](person:Emma).", r.text)
+    }
 }

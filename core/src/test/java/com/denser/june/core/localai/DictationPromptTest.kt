@@ -33,21 +33,26 @@ class DictationPromptTest {
         val p = DictationPrompt.buildSystemPrompt(DictationPrompt.DEFAULT_SYSTEM_PROMPT, listOf("Emma", "Noor"))
         assertTrue(p.startsWith("You rewrite my voice-dictated notes into a clean journal entry for my journal app."))
         assertFalse(p.contains("{{PEOPLE}}"))
-        assertEquals(9, Regex("""(?m)^\d\. """).findAll(p).count())
-        assertTrue(p.lines().last().startsWith("9. Names with @ in front"))
+        assertEquals(11, Regex("""(?m)^\d+\. """).findAll(p).count())
+        assertTrue(p.lines().last().startsWith("11. Names with @ in front"))
+        // every format of June's editor is named
+        for (mark in listOf("**bold**", "*italic*", "__underline__", "~~strikethrough~~", "==highlight==", "`code`", "- [ ]", "1.", ">", "#", "---", "```", "|", "[text](address)", "![name](file)")) {
+            assertTrue("missing $mark", p.contains(mark))
+        }
         assertTrue(p.contains("My friends are Emma and Noor."))
     }
 
     @Test
     fun `an entry only gets the rules it needs`() {
         val plain = DictationPrompt.buildSystemPrompt(DictationPrompt.DEFAULT_SYSTEM_PROMPT, listOf("Emma"), "so uh today i went out")
-        assertEquals(7, Regex("""(?m)^\d\. """).findAll(plain).count())
+        assertEquals(7, Regex("""(?m)^\d+\. """).findAll(plain).count())
         assertFalse(plain.contains("topic tags"))
-        assertFalse(plain.contains("~~"))
+        assertFalse(plain.contains("formatting marks"))
+        assertFalse(plain.contains("layout"))
 
         val rich = DictationPrompt.buildSystemPrompt(DictationPrompt.DEFAULT_SYSTEM_PROMPT, listOf("Emma"), "I *really* went out #carnaval")
-        assertEquals(9, Regex("""(?m)^\d\. """).findAll(rich).count())
-        assertTrue(rich.contains("7. Keep the marks"))
+        assertEquals(9, Regex("""(?m)^\d+\. """).findAll(rich).count())
+        assertTrue(rich.contains("7. My notes use formatting marks: *italic*. Keep every mark"))
         assertTrue(rich.contains("8. Words that start with #"))
 
         // everything before the people is the same text, so the server can reuse it
@@ -79,5 +84,35 @@ class DictationPromptTest {
         val picked = DictationPrompt.relevantPeople(many, "went out with ema and krijn", limit = 10)
         assertEquals(10, picked.size)
         assertTrue("an exact and a misheard name are both kept", picked.containsAll(listOf("Emma", "Krijn")))
+    }
+
+    @Test
+    fun `the markup an entry uses is recognised, and nothing else`() {
+        val f =
+            DictationPrompt.featuresOf(
+                """
+                # Monday
+                - milk
+                - [x] call __mum__
+                1. first
+                > a quote with ==highlight== and `code`
+                ---
+                see [the site](https://example.org) and ![pic](a.jpg) #tag
+                """.trimIndent()
+            )
+        assertEquals(listOf("__underline__", "==highlight==", "`code`"), f.inlineMarks)
+        assertEquals(5, f.blocks.size)
+        assertTrue(f.links)
+        assertTrue(f.topics)
+
+        val plain = DictationPrompt.featuresOf("It cost 3 * 4 euros, #1 on my list. Snake_case_word and 2 - 1.")
+        assertTrue(plain.inlineMarks.isEmpty())
+        assertTrue(plain.blocks.isEmpty())
+        assertFalse(plain.links)
+
+        // a bullet written with * and a divider are layout, not italics
+        val bullets = DictationPrompt.featuresOf("* one\n* two\n\n***")
+        assertTrue(bullets.inlineMarks.isEmpty())
+        assertEquals(2, bullets.blocks.size)
     }
 }

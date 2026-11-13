@@ -114,21 +114,21 @@ class DictationCleanup(
                                 bound = null
                                 continue
                             } else {
-                                return finish(Ended.Problem(Outcome.TooLong), body, people, baseUrl, token, requestId, simple.topics)
+                                return finish(Ended.Problem(Outcome.TooLong), body, people, baseUrl, token, requestId, simple)
                             }
-                        else -> return finish(mapFailure(submitted), body, people, baseUrl, token, requestId, simple.topics)
+                        else -> return finish(mapFailure(submitted), body, people, baseUrl, token, requestId, simple)
                     }
                 when (submission) {
                     is LocalAiSubmission.Finished ->
-                        return finish(Ended.Text(submission.completion), body, people, baseUrl, token, null, simple.topics)
+                        return finish(Ended.Text(submission.completion), body, people, baseUrl, token, null, simple)
                     is LocalAiSubmission.Accepted -> {
                         onServer = true
                         when (val followed = follow(baseUrl, token, requestId, expected, onProgress, submission.job)) {
-                            is Followed.Ended -> return finish(followed.outcome, body, people, baseUrl, token, requestId, simple.topics)
+                            is Followed.Ended -> return finish(followed.outcome, body, people, baseUrl, token, requestId, simple)
                             // the server lost the job (its data was cleared): the same id starts it again
                             Followed.Lost ->
                                 if (++restarts > MAX_RESTARTS) {
-                                    return finish(Ended.Problem(Outcome.Stopped), body, people, baseUrl, token, requestId, simple.topics)
+                                    return finish(Ended.Problem(Outcome.Stopped), body, people, baseUrl, token, requestId, simple)
                                 }
                         }
                     }
@@ -235,7 +235,7 @@ class DictationCleanup(
         baseUrl: String,
         token: String,
         ackId: String?,
-        topics: Map<String, String> = emptyMap(),
+        simple: DictationPrompt.Simplified,
     ): Outcome {
         val keep = ended is Ended.Problem && ended.keepJob
         if (!keep) {
@@ -247,7 +247,7 @@ class DictationCleanup(
         return when (ended) {
             is Ended.Problem -> ended.outcome
             is Ended.Text -> {
-                val result = OutputValidator.validate(ended.completion.text, people, topics = topics)
+                val result = OutputValidator.validate(ended.completion.text, people, topics = simple.topics, original = simple.text)
                 val changes =
                     if (ended.completion.finishReason == FINISH_LENGTH) result.changes + CHANGE_CUT_OFF else result.changes
                 if (result.text.isBlank()) Outcome.EmptyResult else Outcome.Rewrite(body, result.text, changes)
