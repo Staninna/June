@@ -61,6 +61,7 @@ val juneModules = module {
         )
     }
     single { StartupManager(get(), get()) }
+    single { com.denser.june.presentation.screens.editor.CleanupSession(get()) }
     singleOf(::ExternalIntentProcessor)
     singleOf(::LockSessionVM)
     viewModelOf(::SettingsVM)
@@ -74,7 +75,7 @@ val juneModules = module {
             songRepo = get(),
             navigator = get(),
             billingHandler = get(),
-            dictationCleanup = get(),
+            cleanupSession = get(),
             localAiPrefs = get()
         )
     }

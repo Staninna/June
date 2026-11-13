@@ -8,7 +8,8 @@ package com.denser.june.core.localai
  *  - a stray `[` earlier in the text makes the lazy `.+?` swallow everything up to the next mention;
  *  - emphasis around a mention (`**[@Emma](person:Emma)**`) is matched first and breaks the mention.
  * Both are removed here, together with invisible characters, preamble/commentary, and mentions of
- * people that are not in June's People tags.
+ * people that are not in June's People tags. Topic tags (`[#awake](topic:awake)`) are kept, and the
+ * simple forms the model is given (`@Emma`, `#awake`) are turned back into codes.
  */
 object OutputValidator {
 
@@ -19,6 +20,12 @@ object OutputValidator {
 
     // Innermost mention: no brackets inside the display text. The id may not contain parentheses.
     private val INNER_MENTION = Regex("""\[([^\[\]]*)\]\(\s*person\s*:\s*([^()\n]+?)\s*\)""")
+    private val TOPIC_CODE = Regex("""\[(#[^\[\]\s]+)\]\(\s*topic\s*:\s*([^()\n]+?)\s*\)""")
+    // [text](address) and ![name](file), but not a mention or topic code
+    private val LINK = Regex("""!?\[[^\[\]\uE000\uE001]+\]\((?!\s*(?:person|topic)\s*:)[^()\s]+\)""")
+    private val KEPT = Regex("\uE002(\\d+)\uE003")
+    private val WIKI_IMAGE = Regex("""!\[\[[^\[\]]+\]\]""")
+    private val CHECKBOX = Regex("""(?m)^[ \t]*[-*][ \u00A0]\[[ xX]\](?=[ \u00A0])""")
     private val BARE_MENTION = Regex("""(?<![\w@\[])@([\p{L}\p{N}_'-]+)""")
     private val PLACEHOLDER = Regex("(\\d+)")
 
@@ -39,7 +46,14 @@ object OutputValidator {
      * @param linkPlainNames also turn plain, capitalised, whole-word occurrences of known people
      *   into mention codes (prompt rule 6). Small models often write "Emma" instead of the code.
      */
-    fun validate(raw: String, knownPeople: Collection<String>, linkPlainNames: Boolean = true): Result {
+    fun validate(
+        raw: String,
+        knownPeople: Collection<String>,
+        linkPlainNames: Boolean = true,
+        topics: Map<String, String> = emptyMap(),
+        /** The notes as they were sent. What looks like commentary but is in the notes is kept. */
+        original: String? = null,
+    ): Result {
         val changes = mutableListOf<String>()
         var text = raw.replace("\r\n", "\n").replace('\r', '\n')
 
@@ -52,8 +66,9 @@ object OutputValidator {
         if (cleanedInvisible != text) changes += "removed invisible characters"
         text = cleanedInvisible
 
-        text = stripCodeFence(text)
-        text = stripPreambleAndCommentary(text, changes)
+        val originalLines = original.orEmpty().lines().map { it.trim() }.filter { it.isNotEmpty() }.toSet()
+        if (original?.trimStart()?.startsWith("```") != true) text = stripCodeFence(text)
+        text = stripPreambleAndCommentary(text, changes, originalLines)
         text = stripWrappingQuotes(text)
 
         // --- mentions ---------------------------------------------------------------------------
@@ -92,6 +107,46 @@ object OutputValidator {
                 }
         }
         if (unknown > 0) changes += "converted $unknown unknown mention(s) to plain text"
+
+        // Links, pictures and checkboxes are valid markup with square brackets. They are set aside
+        // under their own marker, so the emphasis rule for mentions below leaves them alone.
+        val kept = mutableListOf<String>()
+        for (re in listOf(WIKI_IMAGE, LINK, CHECKBOX)) {
+            text =
+                re.replace(text) { m ->
+                    kept += m.value
+                    "\uE002${kept.size - 1}\uE003"
+                }
+        }
+
+        // topic codes the model wrote out in full are kept as they are
+        text =
+            TOPIC_CODE.replace(text) { m ->
+                mentions += Mention(m.groupValues[1], m.groupValues[2].trim())
+                rendered[mentions.size - 1] = "[${m.groupValues[1]}](topic:${m.groupValues[2].trim()})"
+                "\uE000${mentions.size - 1}\uE001"
+            }
+        // "#awake" as it was sent to the model (DictationPrompt.simplify) becomes the code again
+        for ((display, id) in topics.entries.sortedByDescending { it.key.length }) {
+            val re = Regex("""(?<![\p{L}\p{N}_&/\uE000])""" + Regex.escape(display) + """(?![\p{L}\p{N}_-])""")
+            text =
+                re.replace(text) {
+                    mentions += Mention(display, id)
+                    rendered[mentions.size - 1] = "[$display](topic:$id)"
+                    "\uE000${mentions.size - 1}\uE001"
+                }
+        }
+
+        // "@First Last": names of more than one word, which the pattern below cannot see
+        for (name in people.filter { it.contains(' ') }.sortedByDescending { it.length }) {
+            val re = Regex("""(?<![\w@\[])@""" + Regex.escape(name) + """(?![\p{L}\p{N}_])""", RegexOption.IGNORE_CASE)
+            text =
+                re.replace(text) {
+                    mentions += Mention("@$name", name)
+                    rendered[mentions.size - 1] = "[@$name](person:$name)"
+                    "\uE000${mentions.size - 1}\uE001"
+                }
+        }
 
         // bare "@Name": Hyphen would turn it into a mention on its own
         text =
@@ -135,12 +190,14 @@ object OutputValidator {
 
         // restore unknown mentions first as plain text, then known ones as clean codes
         text = PLACEHOLDER.replace(text) { p -> rendered[p.groupValues[1].toInt()] ?: "" }
+        text = KEPT.replace(text) { p -> kept[p.groupValues[1].toInt()] }
 
         // --- whitespace ------------------------------------------------------------------------
         text =
             text.lines().joinToString("\n") { it.trimEnd() }
                 .replace(Regex("\n{3,}"), "\n\n")
-                .replace(Regex("[ \t]{2,}"), " ")
+                // not at the start of a line: indentation belongs to nested lists
+                .replace(Regex("(?<=\\S)[ \t]{2,}"), " ")
                 .trim()
         return Result(text, changes.distinct())
     }
@@ -162,14 +219,17 @@ object OutputValidator {
         return t
     }
 
-    private fun stripPreambleAndCommentary(text: String, changes: MutableList<String>): String {
-        var paragraphs = text.trim().split(Regex("\n\\s*\n")).map { it.trim() }.filter { it.isNotEmpty() }.toMutableList()
+    private fun stripPreambleAndCommentary(text: String, changes: MutableList<String>, originalLines: Set<String>): String {
+        var paragraphs =
+            text.trim('\n', '\r').split(Regex("\n\\s*\n")).map { it.trim('\n', '\r').trimEnd() }.filter { it.isNotBlank() }.toMutableList()
         if (paragraphs.isEmpty()) return ""
 
         // Leading lines: "Here is the cleaned up entry:", a "# Title", a lone "**Journal Entry**".
         while (paragraphs.size > 1 || (paragraphs.size == 1 && paragraphs[0].lines().size > 1)) {
             val firstPara = paragraphs[0]
             val firstLine = firstPara.lines().first().trim()
+            // a heading, a bold line or a line with a colon that is in my notes is not an intro
+            if (firstLine in originalLines) break
             val isIntro =
                 (PREAMBLE.matches(firstLine) && (firstLine.endsWith(":") || firstLine.length < 80)) ||
                     HEADING.matches(firstLine) ||
@@ -183,12 +243,15 @@ object OutputValidator {
         }
 
         // Trailing commentary after a separator, or a last paragraph that talks about the edit.
-        val sep = paragraphs.indexOfLast { it.matches(Regex("^(-{3,}|\\*{3,}|_{3,})$")) }
-        if (sep >= 0) {
+        val sep = paragraphs.indexOfLast { it.trim().matches(Regex("^(-{3,}|\\*{3,}|_{3,})$")) }
+        if (sep >= 0 && paragraphs[sep].trim() !in originalLines) {
             changes += "removed comments after the entry"
             paragraphs = paragraphs.subList(0, sep).toMutableList()
         }
-        while (paragraphs.size > 1 && TRAILING.containsMatchIn(paragraphs.last())) {
+        while (
+            paragraphs.size > 1 && TRAILING.containsMatchIn(paragraphs.last().trim()) &&
+            paragraphs.last().lines().first().trim() !in originalLines
+        ) {
             changes += "removed comments after the entry"
             paragraphs.removeAt(paragraphs.size - 1)
         }

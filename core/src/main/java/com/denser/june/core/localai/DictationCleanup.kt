@@ -55,7 +55,10 @@ class DictationCleanup(
         val promptTokens: Int = 0,
         val promptTokensProcessed: Int = 0,
         val completionTokens: Int = 0,
-        /** Roughly how many tokens the rewrite will have (the entry's own length). */
+        /**
+         * About how many tokens the rewrite will have: the entry's own share of the prompt tokens
+         * the server counted (a rewrite is about as long as the notes). A guess before that.
+         */
         val expectedTokens: Int = 0,
         val tokensPerSecond: Double? = null,
     ) {
@@ -71,14 +74,24 @@ class DictationCleanup(
                 }
     }
 
-    suspend fun run(body: String, people: List<String>, onProgress: (Progress) -> Unit = {}): Outcome {
+    suspend fun run(body: String, people: List<String>, onProgressRaw: (Progress) -> Unit = {}): Outcome {
         val s = prefs.current
         val token = s.token
         val baseUrl = s.baseUrl
         if (token.isNullOrBlank() || baseUrl == null) return Outcome.NotPaired
-        val prompt = DictationPrompt.buildSystemPrompt(s.systemPromptTemplate, people)
-        val fingerprint = fingerprint(prompt, body)
-        val expected = expectedTokens(body)
+        // the model gets "@Emma" and "#awake" instead of June's link codes; finish() puts them back
+        val simple = DictationPrompt.simplify(body)
+        val notes = simple.text
+        val prompt = DictationPrompt.buildSystemPrompt(s.systemPromptTemplate, people, notes)
+        val fingerprint = fingerprint(prompt, notes)
+        // how much of the prompt is the entry itself: the rewrite will be about that long
+        val share = notes.length.toDouble() / (prompt.length + notes.length).coerceAtLeast(1)
+        val expected = expectedTokens(notes)
+        val onProgress: (Progress) -> Unit = { p ->
+            onProgressRaw(
+                if (p.promptTokens > 0) p.copy(expectedTokens = (p.promptTokens * share).toInt().coerceAtLeast(8)) else p
+            )
+        }
 
         // June's own name for this cleanup. It is stored before anything is sent, so whatever
         // happens next (answer lost, June frozen or killed, server restarted) the same text always
@@ -88,12 +101,12 @@ class DictationCleanup(
                 ?: newRequestId().also { prefs.setPendingJob(it, fingerprint) }
         var onServer = false
         try {
-            var bound: Int? = maxTokens(body)
+            var bound: Int? = maxTokens(notes)
             var restarts = 0
             while (true) {
                 onProgress(Progress(Phase.Sending, expectedTokens = expected))
                 val submission =
-                    when (val submitted = submit(baseUrl, token, prompt, body, bound, requestId)) {
+                    when (val submitted = submit(baseUrl, token, prompt, notes, bound, requestId)) {
                         is LocalAiResult.Ok -> submitted.value
                         LocalAiResult.TooLong ->
                             if (bound != null) {
@@ -101,21 +114,21 @@ class DictationCleanup(
                                 bound = null
                                 continue
                             } else {
-                                return finish(Ended.Problem(Outcome.TooLong), body, people, baseUrl, token, requestId)
+                                return finish(Ended.Problem(Outcome.TooLong), body, people, baseUrl, token, requestId, simple)
                             }
-                        else -> return finish(mapFailure(submitted), body, people, baseUrl, token, requestId)
+                        else -> return finish(mapFailure(submitted), body, people, baseUrl, token, requestId, simple)
                     }
                 when (submission) {
                     is LocalAiSubmission.Finished ->
-                        return finish(Ended.Text(submission.completion), body, people, baseUrl, token, null)
+                        return finish(Ended.Text(submission.completion), body, people, baseUrl, token, null, simple)
                     is LocalAiSubmission.Accepted -> {
                         onServer = true
                         when (val followed = follow(baseUrl, token, requestId, expected, onProgress, submission.job)) {
-                            is Followed.Ended -> return finish(followed.outcome, body, people, baseUrl, token, requestId)
+                            is Followed.Ended -> return finish(followed.outcome, body, people, baseUrl, token, requestId, simple)
                             // the server lost the job (its data was cleared): the same id starts it again
                             Followed.Lost ->
                                 if (++restarts > MAX_RESTARTS) {
-                                    return finish(Ended.Problem(Outcome.Stopped), body, people, baseUrl, token, requestId)
+                                    return finish(Ended.Problem(Outcome.Stopped), body, people, baseUrl, token, requestId, simple)
                                 }
                         }
                     }
@@ -222,6 +235,7 @@ class DictationCleanup(
         baseUrl: String,
         token: String,
         ackId: String?,
+        simple: DictationPrompt.Simplified,
     ): Outcome {
         val keep = ended is Ended.Problem && ended.keepJob
         if (!keep) {
@@ -233,7 +247,7 @@ class DictationCleanup(
         return when (ended) {
             is Ended.Problem -> ended.outcome
             is Ended.Text -> {
-                val result = OutputValidator.validate(ended.completion.text, people)
+                val result = OutputValidator.validate(ended.completion.text, people, topics = simple.topics, original = simple.text)
                 val changes =
                     if (ended.completion.finishReason == FINISH_LENGTH) result.changes + CHANGE_CUT_OFF else result.changes
                 if (result.text.isBlank()) Outcome.EmptyResult else Outcome.Rewrite(body, result.text, changes)

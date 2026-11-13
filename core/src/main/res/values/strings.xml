@@ -770,7 +770,21 @@
 
     <string name="clean_up_dictation">Clean up dictation</string>
     <string name="cleanup_working">Cleaning up…</string>
-    <string name="cleanup_working_desc">The model runs on this phone. You can switch apps or turn off the screen: it keeps going, and the result waits here.</string>
+    <string name="cleanup_working_desc">The model runs on this phone. Swipe this down to keep writing; it keeps going, also with the screen off, and the result waits for you.</string>
+    <string name="cleanup_minimize">Keep writing</string>
+    <string name="cleanup_ready">Cleanup ready</string>
+    <string name="cleanup_review_action">Review</string>
+    <string name="cleanup_stale">You changed this entry after the cleanup started. Accepting replaces it with the rewrite below; Retry cleans up the new text.</string>
+    <string name="cleanup_busy_elsewhere">A cleanup of another entry is still running</string>
+    <string name="cleanup_button_working">Cleanup running. Show progress</string>
+    <string name="cleanup_button_working_percent">Cleanup running, %1$d%%. Show progress</string>
+    <string name="cleanup_button_ready">Cleanup ready. Review it</string>
+    <string name="cleanup_button_problem">Cleanup failed. Show why</string>
+    <string name="cleanup_pill_reading">Reading</string>
+    <string name="cleanup_pill_writing">Writing</string>
+    <string name="cleanup_pill_starting">Starting</string>
+    <string name="cleanup_pill_queued">In line</string>
+    <string name="cleanup_pill_loading">Loading</string>
     <string name="cleanup_phase_queued">Waiting in line…</string>
     <string name="cleanup_phase_loading">Loading the model…</string>
     <string name="cleanup_phase_reading">Reading your entry…</string>

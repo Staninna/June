@@ -74,6 +74,8 @@ fun EditorScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val isLocalAiEnabled by viewModel.isLocalAiEnabled.collectAsStateWithLifecycle()
     val cleanupState by viewModel.cleanup.collectAsStateWithLifecycle()
+    val cleanupIndicator by viewModel.cleanupIndicator.collectAsStateWithLifecycle()
+    val haptics = androidx.compose.ui.platform.LocalHapticFeedback.current
     val cleanupSnackbar = remember { SnackbarHostState() }
     val isMarkdownEnabled = state.isMarkdownEnabled
     val isKeyboardAutocorrectEnabled = state.isKeyboardAutocorrectEnabled
@@ -151,6 +153,23 @@ fun EditorScreen(
     LaunchedEffect(Unit) {
         viewModel.uiEvent.collect { message ->
             Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        // the rewrite arrived while the sheet was put away: a nudge, not an interruption
+        viewModel.cleanupReady.collect {
+            haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+            val result = cleanupSnackbar.showSnackbar(
+                message = context.getString(R.string.cleanup_ready),
+                actionLabel = context.getString(R.string.cleanup_review_action),
+                withDismissAction = true,
+                duration = SnackbarDuration.Long
+            )
+            if (result == SnackbarResult.ActionPerformed) {
+                keyboardController?.hide()
+                viewModel.startCleanup()
+            }
         }
     }
 
@@ -248,6 +267,7 @@ fun EditorScreen(
                     isLoading = state.isLoading,
                     isPlusStylingActive = isPlusStylingActive,
                     showCleanupAction = isLocalAiEnabled && state.content.isNotBlank() && !state.isLoading,
+                    cleanupIndicator = cleanupIndicator,
                     onCleanupClick = {
                         keyboardController?.hide()
                         focusManager.clearFocus(force = true)
@@ -608,6 +628,8 @@ fun EditorScreen(
             onAccept = viewModel::acceptCleanup,
             onRetry = viewModel::retryCleanup,
             onCancel = viewModel::cancelCleanup,
+            onMinimize = viewModel::minimizeCleanup,
+            isStale = remember(cleanupState) { viewModel.isCleanupStale() },
             onOpenServer = LocalAiVM.serverLaunchIntent(context)?.let { intent -> { context.startActivity(intent) } },
             onOpenSettings = {
                 viewModel.cancelCleanup()

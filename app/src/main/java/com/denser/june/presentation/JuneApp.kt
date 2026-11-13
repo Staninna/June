@@ -9,6 +9,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -158,6 +159,21 @@ fun JuneApp(
                 }
 
                 JunePlusPaywallScreen(controller = plusSheetController)
+
+                // a cleanup that runs (or waits for review) while the user is elsewhere in June
+                val cleanupSession = koinInject<com.denser.june.presentation.screens.editor.CleanupSession>()
+                val cleanupSnapshot by cleanupSession.snapshot.collectAsStateWithLifecycle()
+                com.denser.june.presentation.components.CleanupPill(
+                    snapshot = cleanupSnapshot,
+                    onClick = {
+                        val id = cleanupSnapshot.entryKey
+                        if (id != null && cleanupSnapshot.canOpenEntry) {
+                            cleanupSession.expand()
+                            navigator.navigateTo(Route.Editor(journalId = id))
+                        }
+                    },
+                    modifier = Modifier.align(Alignment.BottomCenter),
+                )
             }
 
             val uriHandler = LocalUriHandler.current

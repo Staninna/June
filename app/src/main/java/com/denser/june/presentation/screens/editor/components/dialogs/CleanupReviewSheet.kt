@@ -87,16 +87,20 @@ fun CleanupReviewSheet(
     onAccept: () -> Unit,
     onRetry: () -> Unit,
     onCancel: () -> Unit,
+    onMinimize: () -> Unit,
+    isStale: Boolean,
     onOpenServer: (() -> Unit)?,
     onOpenSettings: () -> Unit,
 ) {
     if (state is CleanupUiState.Hidden) return
+    // Swiping the sheet down, a tap next to it or Back only puts it away: the cleanup carries on
+    // (or the rewrite keeps waiting) and shows on the sparkle button. Only the buttons end it.
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val maxHeight = (LocalConfiguration.current.screenHeightDp * 0.62f).dp
 
     ModalBottomSheet(
         sheetState = sheetState,
-        onDismissRequest = onCancel,
+        onDismissRequest = { if (state is CleanupUiState.Problem) onCancel() else onMinimize() },
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         dragHandle = null,
     ) {
@@ -114,9 +118,9 @@ fun CleanupReviewSheet(
                 label = "cleanup",
             ) { s ->
                 when (s) {
-                    is CleanupUiState.Working -> WorkingContent(s, onCancel)
+                    is CleanupUiState.Working -> WorkingContent(s, onCancel, onMinimize)
                     is CleanupUiState.Problem -> ProblemContent(s, onRetry, onCancel, onOpenServer, onOpenSettings)
-                    is CleanupUiState.Review -> ReviewContent(s, maxHeight, onAccept, onRetry, onCancel)
+                    is CleanupUiState.Review -> ReviewContent(s, maxHeight, isStale, onAccept, onRetry, onCancel)
                     CleanupUiState.Hidden -> Spacer(Modifier.height(1.dp))
                 }
             }
@@ -126,7 +130,7 @@ fun CleanupReviewSheet(
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun WorkingContent(state: CleanupUiState.Working, onCancel: () -> Unit) {
+private fun WorkingContent(state: CleanupUiState.Working, onCancel: () -> Unit, onMinimize: () -> Unit) {
     val progress = state.progress
     val now by
         produceState(System.currentTimeMillis(), state.startedAt) {
@@ -239,6 +243,11 @@ private fun WorkingContent(state: CleanupUiState.Working, onCancel: () -> Unit) 
                 containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
                 contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            JuneFloatingAction(
+                onClick = onMinimize,
+                label = stringResource(R.string.cleanup_minimize),
+                icon = { Icon(painterResource(R.drawable.keyboard_arrow_down_24px), contentDescription = null) },
+            )
         }
     }
 }
@@ -336,6 +345,7 @@ private fun ProblemContent(
 private fun ReviewContent(
     state: CleanupUiState.Review,
     maxHeight: androidx.compose.ui.unit.Dp,
+    isStale: Boolean,
     onAccept: () -> Unit,
     onRetry: () -> Unit,
     onCancel: () -> Unit,
@@ -382,6 +392,20 @@ private fun ReviewContent(
                 color = scheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
             )
+            if (isStale) {
+                Spacer(Modifier.height(12.dp))
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = scheme.tertiaryContainer,
+                    contentColor = scheme.onTertiaryContainer,
+                ) {
+                    Text(
+                        stringResource(R.string.cleanup_stale),
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                    )
+                }
+            }
         }
         Row(
             Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
