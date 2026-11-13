@@ -24,6 +24,10 @@ interface JournalPreferences {
     fun reminderDays(): Flow<Set<DayOfWeek>>
     suspend fun setReminderDays(days: Set<DayOfWeek>)
 
+    /** All journaling moments. Falls back to the legacy single time/days pair when unset. */
+    fun reminderSlots(): Flow<List<com.denser.june.core.domain.reminder.ReminderSlot>>
+    suspend fun setReminderSlots(slots: List<com.denser.june.core.domain.reminder.ReminderSlot>)
+
     fun timeFormat(): Flow<TimeFormat>
     suspend fun setTimeFormat(format: TimeFormat)
 
