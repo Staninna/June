@@ -13,6 +13,14 @@ class DictationPromptTest {
     }
 
     @Test
+    fun `known people merge tags and entry people`() {
+        assertEquals(
+            listOf("Emma", "Noor", "Sam de Vries"),
+            DictationPrompt.knownPeople(listOf("@Emma", "#work"), listOf("emma", "Sam de Vries", " ", "Noor")),
+        )
+    }
+
+    @Test
     fun `people list reads naturally`() {
         assertEquals("Emma", DictationPrompt.peopleList(listOf("Emma")))
         assertEquals("Emma and Noor", DictationPrompt.peopleList(listOf("Emma", "Noor")))

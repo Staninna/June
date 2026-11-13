@@ -758,8 +758,8 @@
     <string name="local_ai_paired_toast">Paired with the server</string>
     <string name="local_ai_pair_cancelled">Pairing was not allowed</string>
     <string name="local_ai_prompt_title">System prompt</string>
-    <string name="local_ai_prompt_desc">{{PEOPLE}} is replaced with your People tags: %1$s</string>
-    <string name="local_ai_prompt_no_people">no People tags yet</string>
+    <string name="local_ai_prompt_desc">{{PEOPLE}} is replaced with your People tags and the people on your entries: %1$s</string>
+    <string name="local_ai_prompt_no_people">no people yet</string>
     <string name="local_ai_prompt_custom">Custom</string>
     <string name="local_ai_prompt_default">Default</string>
     <string name="local_ai_restore_defaults">Restore defaults</string>

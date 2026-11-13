@@ -25,7 +25,7 @@ Rules, most important first:
     fun peopleList(people: List<String>): String {
         val names = people.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
         return when (names.size) {
-            0 -> "not listed (no people tags yet)"
+            0 -> "not listed (no people yet)"
             1 -> names[0]
             else -> names.dropLast(1).joinToString(", ") + " and " + names.last()
         }
@@ -33,6 +33,15 @@ Rules, most important first:
 
     fun buildSystemPrompt(template: String, people: List<String>): String =
         template.replace(PEOPLE_PLACEHOLDER, peopleList(people))
+
+    /**
+     * Everyone June knows: People tags (`@Emma`) plus the people recorded on entries
+     * (JournalPerson names). Case-insensitive de-duplication; tag spelling wins.
+     */
+    fun knownPeople(tags: List<String>, personNames: List<String>): List<String> =
+        (peopleFromTags(tags) + personNames.map { it.trim() }.filter { it.isNotEmpty() })
+            .distinctBy { it.lowercase() }
+            .sortedBy { it.lowercase() }
 
     /** People names from June tags: `@Emma` -> `Emma`. */
     fun peopleFromTags(tags: List<String>): List<String> =

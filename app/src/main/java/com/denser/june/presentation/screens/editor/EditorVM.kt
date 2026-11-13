@@ -131,7 +131,10 @@ class EditorVM(
         _cleanup.value = CleanupUiState.Working
         cleanupJob =
             viewModelScope.launch {
-                val people = DictationPrompt.peopleFromTags(journalRepo.getUniqueTags().first())
+                val people = DictationPrompt.knownPeople(
+                    journalRepo.getUniqueTags().first(),
+                    journalRepo.getKnownPeople().first().map { it.name } + _state.value.people.map { it.name }
+                )
                 _cleanup.value =
                     when (val outcome = dictationCleanup.run(body, people)) {
                         is DictationCleanup.Outcome.Rewrite ->
