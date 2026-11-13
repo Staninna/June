@@ -20,8 +20,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -29,20 +27,16 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.AssistChip
-import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialShapes
@@ -59,19 +53,18 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -100,6 +93,8 @@ import com.denser.june.core.utils.toLocalTime
 import com.denser.june.notification.NotificationsHelper
 import com.denser.june.presentation.components.JuneAppBarType
 import com.denser.june.presentation.components.JuneBackButton
+import com.denser.june.presentation.components.JuneConnectedItem
+import com.denser.june.presentation.components.JuneConnectedList
 import com.denser.june.presentation.components.JuneDateTimePicker
 import com.denser.june.presentation.components.JuneDateTimePickerMode
 import com.denser.june.presentation.components.JuneDialog
@@ -193,14 +188,14 @@ fun ReminderScreen() {
                 end = 16.dp,
                 bottom = 32.dp + padding.calculateBottomPadding()
             ),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            verticalArrangement = Arrangement.spacedBy(0.dp)
         ) {
             item(key = "intro") {
                 Text(
                     text = stringResource(R.string.reminder_screen_desc),
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    modifier = Modifier.padding(start = 8.dp, end = 8.dp, top = 4.dp, bottom = 20.dp)
                 )
             }
 
@@ -210,7 +205,9 @@ fun ReminderScreen() {
                     next = state.next,
                     is24Hour = is24Hour,
                     onToggle = { on ->
-                        haptics.performHapticFeedback(HapticFeedbackType.ToggleOn)
+                        haptics.performHapticFeedback(
+                            if (on) HapticFeedbackType.ToggleOn else HapticFeedbackType.ToggleOff
+                        )
                         if (on) withNotificationPermission { viewModel.toggleReminder(true) }
                         else viewModel.toggleReminder(false)
                     }
@@ -228,7 +225,9 @@ fun ReminderScreen() {
                                 )
                             }
                         },
-                        modifier = Modifier.animateItem()
+                        modifier = Modifier
+                            .padding(top = 8.dp)
+                            .animateItem()
                     )
                 }
             }
@@ -247,12 +246,20 @@ fun ReminderScreen() {
                 }
             }
 
-            items(state.slots, key = { it.id }) { slot ->
+            val nextId = state.next?.first?.id
+            itemsIndexed(state.slots, key = { _, slot -> slot.id }) { index, slot ->
                 ReminderMomentCard(
                     slot = slot,
+                    shape = connectedShape(index, state.slots.size),
+                    isNext = slot.id == nextId,
                     masterEnabled = state.isEnabled,
                     is24Hour = is24Hour,
-                    onToggle = { viewModel.setSlotEnabled(slot.id, it) },
+                    onToggle = {
+                        haptics.performHapticFeedback(
+                            if (it) HapticFeedbackType.ToggleOn else HapticFeedbackType.ToggleOff
+                        )
+                        viewModel.setSlotEnabled(slot.id, it)
+                    },
                     onTimeClick = { pickerTarget = TimePickerTarget.Existing(slot) },
                     onLabelClick = { renameTarget = slot },
                     onDayToggle = { day ->
@@ -272,12 +279,22 @@ fun ReminderScreen() {
                             if (result == SnackbarResult.ActionPerformed) viewModel.restoreSlot(slot)
                         }
                     },
+                    modifier = Modifier
+                        .padding(bottom = if (index == state.slots.lastIndex) 0.dp else 2.dp)
+                        .animateItem()
+                )
+            }
+
+            item(key = "add-header") {
+                SectionHeader(
+                    title = stringResource(R.string.reminder_add_moment),
+                    trailing = null,
                     modifier = Modifier.animateItem()
                 )
             }
 
             item(key = "add") {
-                AddMomentCard(
+                AddMomentSection(
                     existing = state.slots,
                     canAddMore = state.canAddMore,
                     is24Hour = is24Hour,
@@ -292,23 +309,31 @@ fun ReminderScreen() {
 
             if (state.isEnabled && state.slots.isNotEmpty()) {
                 item(key = "test") {
-                    Box(Modifier.fillMaxWidth().animateItem(), contentAlignment = Alignment.Center) {
-                        TextButton(onClick = {
-                            withNotificationPermission {
-                                NotificationsHelper(context).showReminderNotification(
-                                    state.next?.first ?: state.slots.first()
+                    Column(Modifier.animateItem()) {
+                        Spacer(Modifier.height(24.dp))
+                        JuneConnectedItem(
+                            title = stringResource(R.string.reminder_test),
+                            subtitle = stringResource(R.string.reminder_test_desc),
+                            leadingContent = {
+                                Icon(
+                                    painter = painterResource(R.drawable.notifications_24px),
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.secondary
                                 )
-                                scope.launch { snackbarHostState.showSnackbar(testSentMessage) }
+                            },
+                            shape = connectedShape(0, 1),
+                            onClick = {
+                                withNotificationPermission {
+                                    NotificationsHelper(context).showReminderNotification(
+                                        state.next?.first ?: state.slots.first()
+                                    )
+                                    scope.launch {
+                                        snackbarHostState.currentSnackbarData?.dismiss()
+                                        snackbarHostState.showSnackbar(testSentMessage)
+                                    }
+                                }
                             }
-                        }) {
-                            Icon(
-                                painter = painterResource(R.drawable.notifications_24px),
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            Text(stringResource(R.string.reminder_test))
-                        }
+                        )
                     }
                 }
             }
@@ -449,42 +474,42 @@ private fun nextLabel(at: LocalDateTime, is24Hour: Boolean): String {
 
 @Composable
 private fun ExactAlarmBanner(onClick: () -> Unit, modifier: Modifier = Modifier) {
-    Surface(
+    JuneConnectedItem(
+        title = stringResource(R.string.reminder_exact_title),
+        subtitle = stringResource(R.string.reminder_exact_desc),
+        leadingContent = {
+            Icon(
+                painterResource(R.drawable.more_time_24px),
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onTertiaryContainer
+            )
+        },
+        trailingContent = {
+            Icon(
+                painterResource(R.drawable.chevron_right_24px),
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onTertiaryContainer
+            )
+        },
+        shape = connectedShape(0, 1),
+        containerColor = MaterialTheme.colorScheme.tertiaryContainer,
         onClick = onClick,
-        shape = RoundedCornerShape(20.dp),
-        color = MaterialTheme.colorScheme.tertiaryContainer,
-        contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
-        modifier = modifier.fillMaxWidth()
-    ) {
-        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(painterResource(R.drawable.more_time_24px), contentDescription = null)
-            Spacer(Modifier.width(16.dp))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    stringResource(R.string.reminder_exact_title),
-                    style = MaterialTheme.typography.titleSmall
-                )
-                Text(
-                    stringResource(R.string.reminder_exact_desc),
-                    style = MaterialTheme.typography.bodySmall
-                )
-            }
-            Icon(painterResource(R.drawable.chevron_right_24px), contentDescription = null)
-        }
-    }
+        modifier = modifier
+    )
 }
 
+/** Matches [com.denser.june.presentation.screens.settings.components.SettingSection]'s header. */
 @Composable
 private fun SectionHeader(title: String, trailing: String?, modifier: Modifier = Modifier) {
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(start = 8.dp, end = 8.dp, top = 12.dp),
+            .padding(start = 12.dp, end = 12.dp, top = 24.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
             text = title,
-            style = MaterialTheme.typography.labelLarge,
+            style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.primary,
             modifier = Modifier.weight(1f)
         )
@@ -498,6 +523,14 @@ private fun SectionHeader(title: String, trailing: String?, modifier: Modifier =
     }
 }
 
+/** Same corner rhythm as the app's connected lists: 28dp outside, 8dp between items. */
+private fun connectedShape(index: Int, count: Int): RoundedCornerShape = when {
+    count <= 1 -> RoundedCornerShape(28.dp)
+    index == 0 -> RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp, bottomStart = 8.dp, bottomEnd = 8.dp)
+    index == count - 1 -> RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp, bottomStart = 28.dp, bottomEnd = 28.dp)
+    else -> RoundedCornerShape(8.dp)
+}
+
 // ---------------------------------------------------------------------------------------------
 // Moment card
 // ---------------------------------------------------------------------------------------------
@@ -505,6 +538,8 @@ private fun SectionHeader(title: String, trailing: String?, modifier: Modifier =
 @Composable
 private fun ReminderMomentCard(
     slot: ReminderSlot,
+    shape: RoundedCornerShape,
+    isNext: Boolean,
     masterEnabled: Boolean,
     is24Hour: Boolean,
     onToggle: (Boolean) -> Unit,
@@ -520,11 +555,11 @@ private fun ReminderMomentCard(
     val editTimeLabel = stringResource(R.string.reminder_edit_time)
 
     Surface(
-        shape = RoundedCornerShape(24.dp),
+        shape = shape,
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         modifier = modifier.fillMaxWidth()
     ) {
-        Column(Modifier.padding(start = 20.dp, end = 12.dp, top = 16.dp, bottom = 12.dp)) {
+        Column(Modifier.padding(start = 20.dp, end = 12.dp, top = 16.dp, bottom = 8.dp)) {
             Row(verticalAlignment = Alignment.Top) {
                 Column(
                     Modifier
@@ -550,6 +585,25 @@ private fun ReminderMomentCard(
                                 style = MaterialTheme.typography.titleMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.padding(start = 6.dp, bottom = 8.dp)
+                            )
+                        }
+                    }
+                    AnimatedVisibility(
+                        visible = isNext && active,
+                        enter = fadeIn() + expandVertically(),
+                        exit = fadeOut() + shrinkVertically()
+                    ) {
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.tertiaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                            modifier = Modifier.padding(start = 4.dp, bottom = 4.dp)
+                        ) {
+                            Text(
+                                text = stringResource(R.string.reminder_up_next),
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
                             )
                         }
                     }
@@ -681,9 +735,8 @@ private fun DayCircles(
 // Add card
 // ---------------------------------------------------------------------------------------------
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun AddMomentCard(
+private fun AddMomentSection(
     existing: List<ReminderSlot>,
     canAddMore: Boolean,
     is24Hour: Boolean,
@@ -693,87 +746,69 @@ private fun AddMomentCard(
 ) {
     val existingTimes = existing.map { it.localTime }.toSet()
     val available = presets.filter { it.time !in existingTimes }
+    val count = if (canAddMore) available.size + 1 else 1
 
-    Surface(
-        shape = RoundedCornerShape(24.dp),
-        color = Color.Transparent,
-        border = androidx.compose.foundation.BorderStroke(
-            1.dp, MaterialTheme.colorScheme.outlineVariant
-        ),
-        modifier = modifier.fillMaxWidth()
-    ) {
-        Column(Modifier.padding(20.dp).animateContentSize()) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    Modifier
-                        .size(40.dp)
-                        .clip(MaterialShapes.Clover4Leaf.toShape())
-                        .background(MaterialTheme.colorScheme.secondaryContainer),
-                    contentAlignment = Alignment.Center
-                ) {
+    JuneConnectedList(modifier = modifier.fillMaxWidth().animateContentSize()) {
+        if (!canAddMore) {
+            JuneConnectedItem(
+                title = stringResource(R.string.reminder_limit_reached, ReminderSlot.MAX_SLOTS),
+                leadingContent = {
                     Icon(
-                        painterResource(R.drawable.add_24px),
+                        painterResource(R.drawable.info_24px),
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSecondaryContainer
+                        tint = MaterialTheme.colorScheme.secondary
                     )
-                }
-                Spacer(Modifier.width(14.dp))
-                Column {
-                    Text(
-                        stringResource(R.string.reminder_add_moment),
-                        style = MaterialTheme.typography.titleMedium
-                    )
-                    Text(
-                        text = if (canAddMore) stringResource(R.string.reminder_add_moment_desc)
-                        else stringResource(R.string.reminder_limit_reached, ReminderSlot.MAX_SLOTS),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-
-            AnimatedVisibility(
-                visible = canAddMore,
-                enter = fadeIn() + expandVertically(),
-                exit = fadeOut() + shrinkVertically()
-            ) {
-                Column {
-                    Spacer(Modifier.height(14.dp))
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        available.forEach { preset ->
-                            val label = stringResource(preset.labelRes)
-                            val (t, amPm) = formatTime(preset.time, is24Hour)
-                            AssistChip(
-                                onClick = { onPreset(preset, label) },
-                                label = { Text("$label · $t${amPm?.let { " $it" } ?: ""}") },
-                                leadingIcon = {
-                                    Icon(
-                                        painterResource(preset.iconRes),
-                                        contentDescription = null,
-                                        modifier = Modifier.size(AssistChipDefaults.IconSize)
-                                    )
-                                },
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier.heightIn(min = 40.dp)
-                            )
-                        }
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    FilledTonalButton(onClick = onCustom, modifier = Modifier.fillMaxWidth()) {
-                        Icon(
-                            painterResource(R.drawable.more_time_24px),
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(stringResource(R.string.reminder_custom_time))
-                    }
-                }
-            }
+                },
+                shape = connectedShape(0, 1)
+            )
+            return@JuneConnectedList
         }
+        available.forEachIndexed { index, preset ->
+            val label = stringResource(preset.labelRes)
+            val (t, amPm) = formatTime(preset.time, is24Hour)
+            JuneConnectedItem(
+                title = label,
+                subtitle = "$t${amPm?.let { " $it" } ?: ""} · ${stringResource(R.string.repeat_daily)}",
+                leadingContent = {
+                    Icon(
+                        painterResource(preset.iconRes),
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.secondary
+                    )
+                },
+                trailingContent = {
+                    Icon(
+                        painterResource(R.drawable.add_circle_24px),
+                        contentDescription = stringResource(R.string.reminder_add_moment),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                },
+                index = index,
+                count = count,
+                onClick = { onPreset(preset, label) }
+            )
+        }
+        JuneConnectedItem(
+            title = stringResource(R.string.reminder_custom_time),
+            subtitle = stringResource(R.string.reminder_add_moment_desc),
+            leadingContent = {
+                Icon(
+                    painterResource(R.drawable.more_time_24px),
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.secondary
+                )
+            },
+            trailingContent = {
+                Icon(
+                    painterResource(R.drawable.chevron_right_24px),
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            },
+            index = count - 1,
+            count = count,
+            onClick = onCustom
+        )
     }
 }
 
