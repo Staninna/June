@@ -14,7 +14,11 @@ import com.denser.june.core.domain.model.enums.MapStyleProvider
 import com.denser.june.core.domain.preferences.JournalPreferences
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import com.denser.june.core.domain.reminder.ReminderSlot
+import kotlinx.serialization.json.Json
 import java.time.DayOfWeek
+
+private val slotsJson = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
 class JournalPreferencesImpl(
     private val dataStore: DataStore<Preferences>
@@ -26,6 +30,7 @@ class JournalPreferencesImpl(
         val REMINDER_ENABLED = booleanPreferencesKey("reminder_enabled")
         val REMINDER_TIME = stringPreferencesKey("reminder_time")
         val REMINDER_DAYS = stringPreferencesKey("reminder_days")
+        val REMINDER_SLOTS = stringPreferencesKey("reminder_slots")
         val TIME_FORMAT = stringPreferencesKey("time_format")
         val MAP_THEME = stringPreferencesKey("map_theme")
         val MARKDOWN_ENABLED = booleanPreferencesKey("markdown_enabled")
@@ -100,6 +105,31 @@ class JournalPreferencesImpl(
 
     override suspend fun setReminderDays(days: Set<DayOfWeek>) {
         dataStore.edit { it[REMINDER_DAYS] = days.joinToString(",") { it.name } }
+    }
+
+    override fun reminderSlots(): Flow<List<ReminderSlot>> = dataStore.data
+        .map { preferences ->
+            val raw = preferences[REMINDER_SLOTS]
+            val parsed = raw?.let {
+                runCatching { slotsJson.decodeFromString<List<ReminderSlot>>(it) }.getOrNull()
+            }
+            parsed ?: listOf(legacySlot(preferences))
+        }
+
+    override suspend fun setReminderSlots(slots: List<ReminderSlot>) {
+        dataStore.edit { it[REMINDER_SLOTS] = slotsJson.encodeToString(slots) }
+    }
+
+    private fun legacySlot(preferences: Preferences): ReminderSlot {
+        val days = (preferences[REMINDER_DAYS] ?: DayOfWeek.entries.joinToString(",") { it.name })
+            .split(",")
+            .mapNotNull { runCatching { DayOfWeek.valueOf(it) }.getOrNull() }
+        return ReminderSlot(
+            id = ReminderSlot.LEGACY_ID,
+            time = preferences[REMINDER_TIME] ?: DEFAULT_REMINDER_TIME,
+            dayValues = days.map { it.value }.sorted(),
+            enabled = true,
+        )
     }
 
     override fun timeFormat(): Flow<TimeFormat> = dataStore.data

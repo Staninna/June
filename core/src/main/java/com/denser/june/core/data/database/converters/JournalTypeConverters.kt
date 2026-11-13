@@ -3,6 +3,7 @@ package com.denser.june.core.data.database.converters
 import androidx.room.TypeConverter
 import com.denser.june.core.domain.model.FontVariationConfig
 import com.denser.june.core.domain.model.JournalAudio
+import com.denser.june.core.domain.model.JournalPerson
 import com.denser.june.core.domain.model.JournalLocation
 import com.denser.june.core.domain.model.JournalTheme
 import com.denser.june.core.domain.model.SongDetails
@@ -74,6 +75,20 @@ class JournalTypeConverters {
             } catch (e: Exception) {
                 null
             }
+        }
+    }
+
+    @TypeConverter
+    fun fromPeopleList(value: List<JournalPerson>): String {
+        return json.encodeToString(value)
+    }
+
+    @TypeConverter
+    fun toPeopleList(value: String): List<JournalPerson> {
+        return try {
+            json.decodeFromString(value)
+        } catch (e: Exception) {
+            emptyList()
         }
     }
 

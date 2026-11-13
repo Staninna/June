@@ -33,7 +33,8 @@ private data class JournalFrontmatter(
     val tags: List<String> = emptyList(),
     val tag: String? = null,
     val location: JournalLocation? = null,
-    val song: SongDetails? = null
+    val song: SongDetails? = null,
+    val people: List<String> = emptyList()
 )
 
 object MarkdownEngine {
@@ -74,7 +75,8 @@ object MarkdownEngine {
             isArchived = journal.isArchived,
             tags = journal.tags,
             location = journal.location,
-            song = journal.songDetails
+            song = journal.songDetails,
+            people = journal.people.map { it.name }
         )
         val yamlString = yaml.encodeToString(JournalFrontmatter.serializer(), frontmatter).trim()
 
@@ -99,6 +101,9 @@ object MarkdownEngine {
                 val songText = if (song.artistName.isNotBlank()) "${song.title} — ${song.artistName}" else song.title
                 metaParts.add("🎵 $songText")
             }
+        }
+        if (journal.people.isNotEmpty()) {
+            metaParts.add("👥 " + journal.people.joinToString(", ") { it.name })
         }
         if (metaParts.size > 1) {
             sb.append("*").append(metaParts.joinToString(" • ")).append("*\n\n")
@@ -203,6 +208,9 @@ object MarkdownEngine {
             location = frontmatter?.location,
             songDetails = frontmatter?.song,
             tags = combinedTags.distinct(),
+            people = frontmatter?.people.orEmpty()
+                .filter { it.isNotBlank() }
+                .map { com.denser.june.core.domain.model.JournalPerson(name = it.trim()) },
             createdAt = finalCreatedAt,
             updatedAt = updatedAt,
             dateTime = finalDateTime,

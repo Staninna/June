@@ -218,6 +218,12 @@ class EditorVM(
         }
 
         viewModelScope.launch {
+            journalRepo.getKnownPeople().collect { people ->
+                _state.update { it.copy(knownPeople = people) }
+            }
+        }
+
+        viewModelScope.launch {
             journalPrefs.editorLayoutDirection().collect { direction ->
                 _state.update { it.copy(editorLayoutDirection = direction) }
             }
@@ -325,6 +331,16 @@ class EditorVM(
             is EditorAction.Refresh -> updateState { it }
 
             is EditorAction.UpdateTags -> updateState { it.copy(tags = action.tags) }
+            is EditorAction.AddPerson -> updateState { st ->
+                if (st.people.any { it.isSamePerson(action.person) }) st
+                else st.copy(people = st.people + action.person)
+            }
+            is EditorAction.UpdatePerson -> updateState { st ->
+                st.copy(people = st.people.map { if (it.id == action.person.id) action.person else it })
+            }
+            is EditorAction.RemovePerson -> updateState { st ->
+                st.copy(people = st.people.filterNot { it.id == action.id })
+            }
             is EditorAction.SetJournalFont -> {
                 updateState { it.copy(font = action.fontName, fontVariation = action.variation) }
             }
@@ -567,6 +583,7 @@ class EditorVM(
                 currentState.audios.isNotEmpty() ||
                 currentState.emoji != null ||
                 currentState.tags.isNotEmpty() ||
+                currentState.people.isNotEmpty() ||
                 currentState.songDetails != null ||
                 currentState.location != null ||
                 currentState.font != null ||
@@ -576,6 +593,7 @@ class EditorVM(
         return original.title.trim() != currentState.title.trim() ||
                 original.content.trim() != currentState.content.trim() ||
                 original.tags != currentState.tags ||
+                original.people != currentState.people ||
                 original.emoji != currentState.emoji ||
                 original.images != currentState.images ||
                 original.audios != currentState.audios ||
@@ -699,6 +717,7 @@ class EditorVM(
                         location = journal.location,
                         songDetails = details,
                         tags = journal.tags,
+                        people = journal.people,
                         createdAt = journal.createdAt,
                         updatedAt = journal.updatedAt,
                         dateTime = journal.dateTime,
@@ -770,7 +789,8 @@ class EditorVM(
                 currentState.audios.isEmpty() &&
                 currentState.songDetails == null &&
                 currentState.location == null &&
-                currentState.tags.isEmpty()
+                currentState.tags.isEmpty() &&
+                currentState.people.isEmpty()
             ) return@launch
 
             val currentTime = System.currentTimeMillis()
@@ -786,6 +806,7 @@ class EditorVM(
                 location = currentState.location,
                 songDetails = currentState.songDetails,
                 tags = currentState.tags,
+                people = currentState.people,
                 createdAt = existingJournal?.createdAt ?: currentTime,
                 updatedAt = currentTime,
                 dateTime = currentState.dateTime,
@@ -862,6 +883,7 @@ class EditorVM(
                 location = currentState.location,
                 songDetails = currentState.songDetails,
                 tags = currentState.tags,
+                people = currentState.people,
                 createdAt = existingJournal?.createdAt ?: currentTime,
                 updatedAt = currentTime,
                 dateTime = currentState.dateTime,

@@ -12,6 +12,8 @@ import com.denser.june.core.data.mappers.asEntity
 import com.denser.june.core.data.sync.SyncWorker
 import com.denser.june.core.domain.repository.JournalRepository
 import com.denser.june.core.domain.model.Journal
+import com.denser.june.core.domain.model.JournalPerson
+import com.denser.june.core.domain.model.distinctPeople
 import com.denser.june.core.domain.preferences.SyncPreferences
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -156,6 +158,17 @@ class JournalRepositoryImpl(
 
     override fun getUniqueTags(): Flow<List<String>> {
         return journalDao.getAllUniqueTags()
+    }
+
+    override fun getKnownPeople(): Flow<List<JournalPerson>> {
+        val converters = com.denser.june.core.data.database.converters.JournalTypeConverters()
+        return journalDao.getAllPeopleJson().map { rows ->
+            rows.asSequence()
+                .flatMap { converters.toPeopleList(it).asSequence() }
+                .filter { it.name.isNotBlank() }
+                .toList()
+                .distinctPeople()
+        }
     }
 
     override fun getTagCounts(): Flow<Map<String, Int>> {

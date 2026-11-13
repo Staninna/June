@@ -442,6 +442,14 @@ fun EditorScreen(
                                     compactFormattedDate = compactFormattedDate,
                                     formattedTime = formattedTime,
                                     tagCount = state.tags.size,
+                                    peopleCount = state.people.size,
+                                    onPeopleClick = {
+                                        if (!isCustomizing) {
+                                            keyboardController?.hide()
+                                            focusManager.clearFocus()
+                                            dialogState.showPeopleSheet = true
+                                        }
+                                    },
                                     onEmojiClick = {
                                         if (!isCustomizing) {
                                             keyboardController?.hide()
@@ -472,6 +480,24 @@ fun EditorScreen(
                                             dialogState.showTagsDialog = true
                                         }
                                     }
+                                )
+                            }
+
+                            AnimatedVisibility(visible = !isFontMode) {
+                                com.denser.june.presentation.screens.editor.components.people.EditorPeopleRow(
+                                    people = state.people,
+                                    readOnly = isCustomizing,
+                                    onPersonClick = {
+                                        keyboardController?.hide()
+                                        focusManager.clearFocus()
+                                        dialogState.editingPerson = it
+                                    },
+                                    onAddClick = {
+                                        keyboardController?.hide()
+                                        focusManager.clearFocus()
+                                        dialogState.showPeopleSheet = true
+                                    },
+                                    modifier = Modifier.padding(top = 4.dp)
                                 )
                             }
                         }
