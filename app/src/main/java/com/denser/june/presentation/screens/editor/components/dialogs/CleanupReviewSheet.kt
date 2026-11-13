@@ -6,7 +6,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -57,6 +56,15 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
+import androidx.compose.material3.LinearWavyProgressIndicator
+import androidx.compose.runtime.produceState
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import com.denser.june.core.localai.DictationCleanup
+import kotlinx.coroutines.delay
 import com.denser.june.core.R
 import com.denser.june.core.localai.TextDiff
 import com.denser.june.presentation.components.JuneFloatingAction
@@ -106,7 +114,7 @@ fun CleanupReviewSheet(
                 label = "cleanup",
             ) { s ->
                 when (s) {
-                    CleanupUiState.Working -> WorkingContent(onCancel)
+                    is CleanupUiState.Working -> WorkingContent(s, onCancel)
                     is CleanupUiState.Problem -> ProblemContent(s, onRetry, onCancel, onOpenServer, onOpenSettings)
                     is CleanupUiState.Review -> ReviewContent(s, maxHeight, onAccept, onRetry, onCancel)
                     CleanupUiState.Hidden -> Spacer(Modifier.height(1.dp))
@@ -118,20 +126,104 @@ fun CleanupReviewSheet(
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun WorkingContent(onCancel: () -> Unit) {
+private fun WorkingContent(state: CleanupUiState.Working, onCancel: () -> Unit) {
+    val progress = state.progress
+    val now by
+        produceState(System.currentTimeMillis(), state.startedAt) {
+            while (true) {
+                value = System.currentTimeMillis()
+                delay(1_000)
+            }
+        }
+    val title =
+        when (progress.phase) {
+            DictationCleanup.Phase.Sending -> stringResource(R.string.cleanup_working)
+            DictationCleanup.Phase.Queued -> stringResource(R.string.cleanup_phase_queued)
+            DictationCleanup.Phase.LoadingModel -> stringResource(R.string.cleanup_phase_loading)
+            DictationCleanup.Phase.Reading -> stringResource(R.string.cleanup_phase_reading)
+            DictationCleanup.Phase.Writing -> stringResource(R.string.cleanup_phase_writing)
+        }
+    val detail =
+        when (progress.phase) {
+            DictationCleanup.Phase.Queued ->
+                progress.queuePosition?.let { stringResource(R.string.cleanup_detail_queue, it) }
+            DictationCleanup.Phase.Reading ->
+                progress.fraction?.let { stringResource(R.string.cleanup_detail_percent, (it * 100).toInt()) }
+            DictationCleanup.Phase.Writing ->
+                progress.tokensPerSecond?.let {
+                    stringResource(R.string.cleanup_detail_writing_speed, progress.completionTokens, it)
+                } ?: stringResource(R.string.cleanup_detail_writing, progress.completionTokens)
+            else -> null
+        }
+    val elapsed = ((now - state.startedAt) / 1000).coerceAtLeast(0)
+    val elapsedText = "%d:%02d".format(elapsed / 60, elapsed % 60)
+    val steps =
+        listOf(
+            DictationCleanup.Phase.Queued to R.string.cleanup_step_queue,
+            DictationCleanup.Phase.LoadingModel to R.string.cleanup_step_load,
+            DictationCleanup.Phase.Reading to R.string.cleanup_step_read,
+            DictationCleanup.Phase.Writing to R.string.cleanup_step_write,
+        )
+    val current = steps.indexOfFirst { it.first == progress.phase }
+
     Column(
         Modifier.fillMaxWidth().padding(vertical = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         ContainedLoadingIndicator(Modifier.size(72.dp))
         Spacer(Modifier.height(20.dp))
-        Text(
-            stringResource(R.string.cleanup_working),
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
-        )
-        Spacer(Modifier.height(8.dp))
+        Column(
+            Modifier.semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite },
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            AnimatedContent(title, transitionSpec = { fadeIn() togetherWith fadeOut() }, label = "phase") { text ->
+                Text(text, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+            }
+            Spacer(Modifier.height(4.dp))
+            Text(
+                listOfNotNull(detail, elapsedText).joinToString(" · "),
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+        }
+        Spacer(Modifier.height(20.dp))
+
+        // Queue, Load, Read, Write: where the request is on the server
+        Row(Modifier.fillMaxWidth().clearAndSetSemantics {}, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            steps.forEachIndexed { i, (_, label) ->
+                val color by
+                    animateColorAsState(
+                        when {
+                            current < 0 -> MaterialTheme.colorScheme.surfaceContainerHighest
+                            i < current -> MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)
+                            i == current -> MaterialTheme.colorScheme.primary
+                            else -> MaterialTheme.colorScheme.surfaceContainerHighest
+                        },
+                        label = "step",
+                    )
+                Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Box(Modifier.fillMaxWidth().height(6.dp).background(color, CircleShape))
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        stringResource(label),
+                        style = MaterialTheme.typography.labelMedium,
+                        color =
+                            if (i == current) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(16.dp))
+        val fraction = progress.fraction
+        if (fraction != null) {
+            val animated by animateFloatAsState(fraction, label = "progress")
+            LinearWavyProgressIndicator(progress = { animated }, modifier = Modifier.fillMaxWidth())
+        } else {
+            LinearWavyProgressIndicator(Modifier.fillMaxWidth())
+        }
+        Spacer(Modifier.height(16.dp))
         Text(
             stringResource(R.string.cleanup_working_desc),
             style = MaterialTheme.typography.bodyMedium,
@@ -168,6 +260,7 @@ private fun ProblemContent(
             CleanupUiState.Kind.Busy -> R.string.cleanup_busy_title to stringResource(R.string.cleanup_busy_desc)
             CleanupUiState.Kind.TooLong -> R.string.cleanup_too_long_title to stringResource(R.string.cleanup_too_long_desc)
             CleanupUiState.Kind.Empty -> R.string.cleanup_empty_title to stringResource(R.string.cleanup_empty_desc)
+            CleanupUiState.Kind.Stopped -> R.string.cleanup_stopped_title to stringResource(R.string.cleanup_stopped_desc)
             CleanupUiState.Kind.Error -> R.string.cleanup_error_title to (state.message ?: "")
         }
     val wantsServer = state.kind == CleanupUiState.Kind.ServerUnavailable || state.kind == CleanupUiState.Kind.NoModel

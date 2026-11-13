@@ -770,7 +770,21 @@
 
     <string name="clean_up_dictation">Clean up dictation</string>
     <string name="cleanup_working">Cleaning up…</string>
-    <string name="cleanup_working_desc">The model runs on this phone. Long entries can take a minute.</string>
+    <string name="cleanup_working_desc">The model runs on this phone. You can switch apps or turn off the screen: it keeps going, and the result waits here.</string>
+    <string name="cleanup_phase_queued">Waiting in line…</string>
+    <string name="cleanup_phase_loading">Loading the model…</string>
+    <string name="cleanup_phase_reading">Reading your entry…</string>
+    <string name="cleanup_phase_writing">Writing…</string>
+    <string name="cleanup_step_queue">Queue</string>
+    <string name="cleanup_step_load">Load</string>
+    <string name="cleanup_step_read">Read</string>
+    <string name="cleanup_step_write">Write</string>
+    <string name="cleanup_detail_queue">Number %1$d in line</string>
+    <string name="cleanup_detail_percent">%1$d%%</string>
+    <string name="cleanup_detail_writing">%1$d tokens</string>
+    <string name="cleanup_detail_writing_speed">%1$d tokens at %2$.1f per second</string>
+    <string name="cleanup_stopped_title">The cleanup was stopped</string>
+    <string name="cleanup_stopped_desc">It was stopped in the server app, or the server was restarted. Try again.</string>
     <string name="cleanup_review_title">Review cleanup</string>
     <string name="cleanup_review_desc">Nothing changes until you accept.</string>
     <string name="cleanup_tab_changes">Changes</string>

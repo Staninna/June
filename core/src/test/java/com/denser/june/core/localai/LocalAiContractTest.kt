@@ -11,7 +11,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** Pins the client side of docs/LOCAL_LLM_API.md (contract v1). */
+/** Pins the client side of docs/LOCAL_LLM_API.md (contract v2). */
 class LocalAiContractTest {
     private val json = LocalAiContract.json
 

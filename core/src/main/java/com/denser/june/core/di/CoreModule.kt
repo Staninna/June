@@ -75,7 +75,7 @@ val coreModule = module {
     // "Internet access" switch (which blocks real network traffic) does not apply to on-device calls.
     single { LocalAiPreferences(get()) }
     single { LocalAiClient() }
-    singleOf(::DictationCleanup)
+    single { DictationCleanup(get(), get<LocalAiPreferences>()) }
 
     single {
         OkHttpClient.Builder()
