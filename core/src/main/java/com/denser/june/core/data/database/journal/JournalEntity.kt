@@ -7,6 +7,7 @@ import com.denser.june.core.data.database.converters.JournalTypeConverters
 import com.denser.june.core.domain.model.FontVariationConfig
 import com.denser.june.core.domain.model.JournalAudio
 import com.denser.june.core.domain.model.JournalLocation
+import com.denser.june.core.domain.model.JournalPerson
 import com.denser.june.core.domain.model.JournalTheme
 import com.denser.june.core.domain.model.SongDetails
 
@@ -23,6 +24,7 @@ data class JournalEntity(
     val songDetails: SongDetails? = null,
     val audios: List<JournalAudio> = emptyList(),
     val tags: List<String> = emptyList(),
+    val people: List<JournalPerson> = emptyList(),
     val createdAt: Long = 0,
     val updatedAt: Long? = null,
     val dateTime: Long,

@@ -1,6 +1,8 @@
 package com.denser.june.core.domain.model
 
 import com.denser.june.core.utils.toHexString
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import java.io.File
@@ -18,6 +20,10 @@ data class Journal(
     val songDetails: SongDetails? = null,
     val audios: List<JournalAudio> = emptyList(),
     val tags: List<String> = emptyList(),
+    // Omitted from JSON when empty so existing content hashes (and sync state) stay stable.
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val people: List<JournalPerson> = emptyList(),
     val createdAt: Long,
     val updatedAt: Long?,
     val dateTime: Long,
@@ -54,6 +60,7 @@ data class Journal(
                thisSongNormalized == otherSongNormalized &&
                thisAudios == otherAudios &&
                this.tags == other.tags &&
+               this.people == other.people &&
                this.isBookmarked == other.isBookmarked &&
                this.isArchived == other.isArchived &&
                this.isDraft == other.isDraft &&

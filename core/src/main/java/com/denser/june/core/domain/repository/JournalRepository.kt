@@ -43,6 +43,8 @@ interface JournalRepository {
 
     fun getTagSuggestions(query: String): Flow<List<String>>
     fun getUniqueTags(): Flow<List<String>>
+    /** Everyone mentioned in unlocked entries, most recently seen first, de-duplicated. */
+    fun getKnownPeople(): Flow<List<com.denser.june.core.domain.model.JournalPerson>>
     fun getTagCounts(): Flow<Map<String, Int>>
     suspend fun toggleBookmark(id: String)
     suspend fun toggleLock(id: String)
