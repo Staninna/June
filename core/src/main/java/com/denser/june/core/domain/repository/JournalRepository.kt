@@ -50,6 +50,11 @@ interface JournalRepository {
     suspend fun toggleLock(id: String)
     suspend fun renameTag(oldName: String, newName: String)
     suspend fun deleteTag(tagName: String)
+    /**
+     * Changes a person everywhere at once: name, context note and contact link are written to
+     * every entry [old] is on. Renaming onto someone who already exists merges the two.
+     */
+    suspend fun updatePerson(old: com.denser.june.core.domain.model.JournalPerson, updated: com.denser.june.core.domain.model.JournalPerson)
 
     fun observeHasUnsyncedJournals(threshold: Long): Flow<Boolean>
     suspend fun hasUnsyncedJournals(threshold: Long): Boolean

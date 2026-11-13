@@ -4,6 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.denser.june.core.domain.repository.JournalRepository
 import com.denser.june.core.domain.model.Journal
+import com.denser.june.core.domain.model.JournalPerson
+import com.denser.june.core.domain.model.labels
 import com.denser.june.core.domain.model.enums.TagCategory
 import com.denser.june.core.domain.model.enums.TimeFormat
 import com.denser.june.core.domain.preferences.JournalPreferences
@@ -52,6 +54,10 @@ class TagsVM(
         }
     }
 
+    /** Everyone on the journal's entries, to show a `@Name` label as the person it stands for. */
+    val knownPeople: StateFlow<List<JournalPerson>> = repository.getKnownPeople()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     val tagCounts: StateFlow<Map<String, Int>> = repository.getTagCounts()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
 
@@ -69,7 +75,7 @@ class TagsVM(
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     val availableFilters: StateFlow<List<String>> = journals.map { currentJournals ->
-        currentJournals?.flatMap { it.tags }
+        currentJournals?.flatMap { it.labels }
             ?.distinct()
             ?.filter { it != _selectedPrimaryTag.value }
             ?.sorted() ?: emptyList()
@@ -98,6 +104,18 @@ class TagsVM(
             repository.renameTag(oldTag, newTag)
             _selectedCategory.value = targetCategory
             _selectedPrimaryTag.value = newTag
+            _selectedFilters.value = emptySet()
+        }
+    }
+
+    /** Saves an edit to the selected person on every entry they are on. */
+    fun updateCurrentPerson(old: JournalPerson, updated: JournalPerson) {
+        val name = updated.name.trim()
+        if (name.isEmpty()) return
+        val person = updated.copy(name = name)
+        viewModelScope.launch {
+            repository.updatePerson(old, person)
+            _selectedPrimaryTag.value = person.label
             _selectedFilters.value = emptySet()
         }
     }

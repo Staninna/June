@@ -17,11 +17,13 @@ import com.denser.june.presentation.components.JuneDialog
 fun DeleteTagDialog(
     tagName: String,
     onDismiss: () -> Unit,
-    onConfirm: () -> Unit
+    onConfirm: () -> Unit,
+    /** The label is a person (`@Name`): word the dialog for a person and show their name. */
+    isPerson: Boolean = false
 ) {
     JuneDialog(
         onDismissRequest = onDismiss,
-        title = stringResource(R.string.delete_tag_title),
+        title = stringResource(if (isPerson) R.string.people_delete_title else R.string.delete_tag_title),
         icon = R.drawable.delete_24px,
         iconTint = MaterialTheme.colorScheme.error,
         text = {
@@ -39,7 +41,7 @@ fun DeleteTagDialog(
                     onClick = { },
                     label = {
                         Text(
-                            tagName,
+                            if (isPerson) TagUtils.getCleanTagName(tagName) else tagName,
                             style = MaterialTheme.typography.bodyLarge,
                             fontWeight = FontWeight.Bold
                         )
@@ -49,7 +51,7 @@ fun DeleteTagDialog(
                     border = null
                 )
                 Text(
-                    text = stringResource(R.string.delete_tag_warning)
+                    text = stringResource(if (isPerson) R.string.people_delete_warning else R.string.delete_tag_warning)
                 )
             }
         },

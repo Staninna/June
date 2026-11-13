@@ -2,6 +2,8 @@ package com.denser.june.core.data.repository
 
 import com.denser.june.core.data.database.journal.JournalEntity
 import com.denser.june.core.data.database.journal.JournalTagCrossRef
+import com.denser.june.core.domain.model.Journal
+import com.denser.june.core.domain.model.JournalPerson
 import com.denser.june.core.sync.fakes.FakeJournalDao
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -139,5 +141,72 @@ class JournalTagRepositoryTest {
         assertEquals(listOf("other"), fakeDao.journals["j_normal"]?.tags)
         assertEquals(emptyList<String>(), fakeDao.journals["j_locked"]?.tags)
         assertEquals(emptyList<String>(), fakeDao.journals["j_trash"]?.tags)
+    }
+
+    // --- People are labels too -------------------------------------------------------------
+
+    private fun journal(id: String, tags: List<String> = emptyList(), people: List<JournalPerson> = emptyList()) =
+        Journal(id = id, title = "t", content = "c", tags = tags, people = people, createdAt = 1L, updatedAt = 1L, dateTime = 1L)
+
+    @Test
+    fun insertJournal_movesPeopleTagsToPeopleAndIndexesThemAsLabels() = runTest {
+        repository.insertJournal(journal("j1", tags = listOf("work", "@Anna")))
+
+        val stored = fakeDao.journals["j1"]!!
+        assertEquals(listOf("work"), stored.tags)
+        assertEquals(listOf("Anna"), stored.people.map { it.name })
+        assertEquals(setOf("work", "@Anna"), fakeDao.crossRefs.filter { it.id == "j1" }.map { it.tagName }.toSet())
+    }
+
+    @Test
+    fun updateJournal_indexesPeopleWithSpacesInTheirName() = runTest {
+        repository.insertJournal(journal("j1"))
+        repository.updateJournal(journal("j1", people = listOf(JournalPerson(name = "Anna van Dijk"))))
+
+        assertEquals(listOf("@Anna van Dijk"), fakeDao.crossRefs.filter { it.id == "j1" }.map { it.tagName })
+    }
+
+    @Test
+    fun updatePerson_changesThePersonOnEveryEntry() = runTest {
+        val anna = JournalPerson(id = "a", name = "Anna")
+        repository.insertJournal(journal("j1", people = listOf(anna)))
+        repository.insertJournal(journal("j2", people = listOf(anna.copy(id = "b"), JournalPerson(name = "Tom"))))
+        repository.insertJournal(journal("j3", people = listOf(JournalPerson(name = "Tom"))))
+
+        repository.updatePerson(anna, anna.copy(name = "Anna V", note = "Sister", contactLookupKey = "key"))
+
+        listOf("j1", "j2").forEach { id ->
+            val person = fakeDao.journals[id]!!.people.first()
+            assertEquals("Anna V", person.name)
+            assertEquals("Sister", person.note)
+            assertEquals("key", person.contactLookupKey)
+        }
+        assertEquals(listOf("Tom"), fakeDao.journals["j3"]!!.people.map { it.name })
+        assertTrue(fakeDao.crossRefs.none { it.tagName == "@Anna" })
+        assertEquals(setOf("j1", "j2"), fakeDao.crossRefs.filter { it.tagName == "@Anna V" }.map { it.id }.toSet())
+        assertFalse(fakeDao.tags.contains("@Anna"))
+    }
+
+    @Test
+    fun renameTag_renamesAPerson() = runTest {
+        repository.insertJournal(journal("j1", people = listOf(JournalPerson(name = "Anna", note = "Sister"))))
+
+        repository.renameTag("@Anna", "@Annabel")
+
+        val person = fakeDao.journals["j1"]!!.people.single()
+        assertEquals("Annabel", person.name)
+        assertEquals("Sister", person.note)
+        assertEquals(listOf("@Annabel"), fakeDao.crossRefs.map { it.tagName })
+    }
+
+    @Test
+    fun deleteTag_removesAPersonFromEveryEntry() = runTest {
+        repository.insertJournal(journal("j1", tags = listOf("work"), people = listOf(JournalPerson(name = "Anna"))))
+
+        repository.deleteTag("@Anna")
+
+        assertTrue(fakeDao.journals["j1"]!!.people.isEmpty())
+        assertEquals(listOf("work"), fakeDao.journals["j1"]!!.tags)
+        assertEquals(listOf("work"), fakeDao.crossRefs.map { it.tagName })
     }
 }

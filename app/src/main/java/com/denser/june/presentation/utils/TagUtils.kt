@@ -11,6 +11,8 @@ import com.denser.june.core.domain.model.enums.TagCategory
 object TagUtils {
 
     const val TAG_CHARACTER_LIMIT = 25
+    /** People are full names, so they get more room than a tag. */
+    const val PERSON_CHARACTER_LIMIT = 40
 
     data class CategoryUiSpec(
         val iconRes: Int,

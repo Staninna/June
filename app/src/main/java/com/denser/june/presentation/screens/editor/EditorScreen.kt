@@ -97,7 +97,7 @@ fun EditorScreen(
 
     val onTagSelect: (String) -> Unit = { tag ->
         val trimmed = tag.trim()
-        if (trimmed.isNotBlank() && state.tags.none { it.equals(trimmed, ignoreCase = true) }) {
+        if (trimmed.isNotBlank() && state.labels.none { it.equals(trimmed, ignoreCase = true) }) {
             viewModel.onAction(EditorAction.UpdateTags(state.tags + trimmed))
         }
     }
@@ -461,15 +461,7 @@ fun EditorScreen(
                                     formattedDate = formattedDate,
                                     compactFormattedDate = compactFormattedDate,
                                     formattedTime = formattedTime,
-                                    tagCount = state.tags.size,
-                                    peopleCount = state.people.size,
-                                    onPeopleClick = {
-                                        if (!isCustomizing) {
-                                            keyboardController?.hide()
-                                            focusManager.clearFocus()
-                                            dialogState.showPeopleSheet = true
-                                        }
-                                    },
+                                    tagCount = state.labels.size,
                                     onEmojiClick = {
                                         if (!isCustomizing) {
                                             keyboardController?.hide()
@@ -568,7 +560,7 @@ fun EditorScreen(
                             state = hyphenState,
                             activeTrigger = activeTrigger,
                             tagSuggestions = state.tagSuggestions,
-                            currentTags = state.tags,
+                            currentTags = state.labels,
                             onTagSelect = onTagSelect,
                             modifier = Modifier
                                 .fillMaxWidth()

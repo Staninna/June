@@ -22,7 +22,13 @@ sealed interface EditorAction {
     data class MoveImageToFront(val uri: String) : EditorAction
     data object Refresh : EditorAction
 
+    /** Sets the entry's tags. Any `@name` among them becomes a person on the entry. */
     data class UpdateTags(val tags: List<String>) : EditorAction
+    /** Sets tags and people together, as edited in the tags dialog. */
+    data class UpdateLabels(
+        val tags: List<String>,
+        val people: List<com.denser.june.core.domain.model.JournalPerson>
+    ) : EditorAction
     data class SearchTags(val query: String) : EditorAction
 
     data class AddPerson(val person: com.denser.june.core.domain.model.JournalPerson) : EditorAction

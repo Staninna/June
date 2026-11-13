@@ -27,16 +27,92 @@ class JournalPersonTest {
     }
 
     @Test
-    fun `same contact is the same person even if renamed`() {
-        val a = JournalPerson(name = "Anna", contactLookupKey = "k1")
-        val b = JournalPerson(name = "Anna V.", contactLookupKey = "k1")
-        assertTrue(a.isSamePerson(b))
+    fun `a person is recognised by name whatever the case or contact link`() {
+        assertTrue(JournalPerson(name = "Tom").isSamePerson(JournalPerson(name = " tom ")))
+        assertTrue(JournalPerson(name = "Tom").isSamePerson(JournalPerson(name = "Tom", contactLookupKey = "x")))
+        assertFalse(JournalPerson(name = "Tom").isSamePerson(JournalPerson(name = "Tim")))
     }
 
     @Test
-    fun `unlinked people match on case-insensitive name`() {
-        assertTrue(JournalPerson(name = "Tom").isSamePerson(JournalPerson(name = " tom ")))
-        assertFalse(JournalPerson(name = "Tom").isSamePerson(JournalPerson(name = "Tom", contactLookupKey = "x")))
+    fun `a person is labelled with an at sign`() {
+        assertEquals("@Anna van Dijk", JournalPerson(name = " Anna van Dijk ").label)
+        assertEquals("Anna van Dijk", JournalPerson.nameFromLabel("@Anna van Dijk"))
+    }
+
+    @Test
+    fun `adding someone who is already there only brings a new contact link`() {
+        val tom = JournalPerson(id = "t", name = "Tom", note = "Friend")
+        assertEquals(listOf(tom), listOf(tom).withPerson(JournalPerson(name = "tom")))
+        assertEquals(
+            listOf(tom.copy(contactLookupKey = "key")),
+            listOf(tom).withPerson(JournalPerson(name = "Tom", contactLookupKey = "key"))
+        )
+        assertEquals(2, listOf(tom).withPerson(JournalPerson(name = "Anna")).size)
+    }
+
+    @Test
+    fun `people tags become people and leave the tags`() {
+        val unified = unifyPeople(listOf("work", "@Anna", "#idea", "@"), emptyList())
+        assertEquals(listOf("work", "#idea"), unified.tags)
+        assertEquals(listOf("Anna"), unified.people.map { it.name })
+        assertEquals(listOf("work", "#idea", "@Anna"), unified.all)
+    }
+
+    @Test
+    fun `a people tag does not duplicate a person already on the entry`() {
+        val anna = JournalPerson(id = "p", name = "Anna", note = "Sister", contactLookupKey = "k")
+        val unified = unifyPeople(listOf("@anna"), listOf(anna))
+        assertEquals(listOf(anna), unified.people)
+        assertTrue(unified.tags.isEmpty())
+    }
+
+    @Test
+    fun `a people tag picks up the known person with note and contact`() {
+        val known = JournalPerson(id = "k", name = "Anna", note = "Sister", contactLookupKey = "key")
+        val unified = unifyPeople(listOf("@anna"), emptyList(), known = listOf(known))
+        assertEquals(listOf(known), unified.people)
+    }
+
+    @Test
+    fun `unifying an entry without people tags changes nothing`() {
+        val entry = journal.copy(tags = listOf("work"), people = listOf(JournalPerson(id = "p", name = "Tom")))
+        assertTrue(entry === entry.withUnifiedPeople())
+        assertEquals(listOf("work", "@Tom"), entry.labels)
+    }
+
+    @Test
+    fun `relabel renames a person and keeps their details`() {
+        val anna = JournalPerson(id = "p", name = "Anna", note = "Sister")
+        val result = relabel(listOf("work"), listOf(anna), "@Anna", "@Anna V")
+        assertEquals(listOf(anna.copy(name = "Anna V")), result.people)
+        assertEquals(listOf("work"), result.tags)
+    }
+
+    @Test
+    fun `relabel merges into a person who is already there`() {
+        val anna = JournalPerson(id = "a", name = "Anna")
+        val ann = JournalPerson(id = "b", name = "Ann")
+        val result = relabel(emptyList(), listOf(anna, ann), "@Ann", "@Anna")
+        assertEquals(listOf(anna), result.people)
+    }
+
+    @Test
+    fun `relabel can turn a person into a topic and a tag into a person`() {
+        val toTopic = relabel(emptyList(), listOf(JournalPerson(name = "Anna")), "@Anna", "#anna")
+        assertEquals(listOf("#anna"), toTopic.tags)
+        assertTrue(toTopic.people.isEmpty())
+
+        val toPerson = relabel(listOf("Anna", "work"), emptyList(), "Anna", "@Anna")
+        assertEquals(listOf("work"), toPerson.tags)
+        assertEquals(listOf("Anna"), toPerson.people.map { it.name })
+    }
+
+    @Test
+    fun `markdown import turns people tags into people`() {
+        val md = "---\ntags:\n  - work\n  - \"@Anna\"\n---\n\nHello"
+        val parsed = MarkdownEngine.fromMarkdown(md)
+        assertEquals(listOf("work"), parsed.tags)
+        assertEquals(listOf("Anna"), parsed.people.map { it.name })
     }
 
     @Test

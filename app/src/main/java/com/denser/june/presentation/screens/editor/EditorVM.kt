@@ -22,6 +22,10 @@ import com.denser.june.core.domain.repository.JournalRepository
 import com.denser.june.core.domain.repository.SongRepository
 import com.denser.june.core.domain.preferences.JournalPreferences
 import com.denser.june.core.domain.model.Journal
+import com.denser.june.core.domain.model.JournalPerson
+import com.denser.june.core.domain.model.distinctPeople
+import com.denser.june.core.domain.model.unifyPeople
+import com.denser.june.core.domain.model.withPerson
 import com.denser.june.core.domain.model.JournalAudio
 import com.denser.june.core.domain.model.JournalTheme
 import com.denser.june.core.domain.model.SongDetails
@@ -83,13 +87,16 @@ class EditorVM(
             val initialTitle = editorRoute?.initialTitle ?: ""
             val initialContent = editorRoute?.initialContent ?: ""
             val initialEmoji = editorRoute?.initialEmoji
+            val initialLabels = unifyPeople(editorRoute?.initialTags ?: emptyList(), emptyList())
             EditorState(
                 journalId = journalId,
                 title = initialTitle,
                 content = initialContent,
                 emoji = initialEmoji,
                 dateTime = routeDate ?: getTodayAtMidnight(),
-                tags = editorRoute?.initialTags ?: emptyList(),
+                tags = initialLabels.tags,
+                people = initialLabels.people,
+                hydratePeople = journalId == null && initialLabels.people.isNotEmpty(),
                 isDraft = true,
                 isLoading = journalId != null,
                 isDirty = initialTitle.isNotBlank() || initialContent.isNotBlank() || initialEmoji != null
@@ -270,8 +277,14 @@ class EditorVM(
         }
 
         viewModelScope.launch {
-            journalRepo.getKnownPeople().collect { people ->
-                _state.update { it.copy(knownPeople = people) }
+            journalRepo.getKnownPeople().collect { known ->
+                _state.update { st ->
+                    // A new entry started from a person label only knows the name: fill in the rest.
+                    val people = if (!st.hydratePeople) st.people else st.people.map { person ->
+                        known.firstOrNull { it.isSamePerson(person) } ?: person
+                    }
+                    st.copy(knownPeople = known, people = people, hydratePeople = false)
+                }
             }
         }
 
@@ -382,13 +395,32 @@ class EditorVM(
             }
             is EditorAction.Refresh -> updateState { it }
 
-            is EditorAction.UpdateTags -> updateState { it.copy(tags = action.tags) }
-            is EditorAction.AddPerson -> updateState { st ->
-                if (st.people.any { it.isSamePerson(action.person) }) st
-                else st.copy(people = st.people + action.person)
+            is EditorAction.UpdateTags -> updateState { st ->
+                val unified = unifyPeople(action.tags, st.people, st.knownPeople)
+                st.copy(tags = unified.tags, people = unified.people)
             }
-            is EditorAction.UpdatePerson -> updateState { st ->
-                st.copy(people = st.people.map { if (it.id == action.person.id) action.person else it })
+            is EditorAction.UpdateLabels -> {
+                val before = _state.value.people
+                val unified = unifyPeople(action.tags, action.people, _state.value.knownPeople)
+                updateState { it.copy(tags = unified.tags, people = unified.people) }
+                unified.people.forEach { person ->
+                    val old = before.firstOrNull { it.id == person.id }
+                        ?: _state.value.knownPeople.firstOrNull { it.isSamePerson(person) }
+                    if (old != null) updatePersonEverywhere(old, person)
+                }
+            }
+            is EditorAction.AddPerson -> {
+                updateState { st -> st.copy(people = st.people.withPerson(action.person)) }
+                // Linking a contact while adding counts for the person, not just for this entry.
+                _state.value.knownPeople.firstOrNull { it.isSamePerson(action.person) }
+                    ?.let { updatePersonEverywhere(it, action.person) }
+            }
+            is EditorAction.UpdatePerson -> {
+                val old = _state.value.people.firstOrNull { it.id == action.person.id }
+                updateState { st ->
+                    st.copy(people = st.people.map { if (it.id == action.person.id) action.person else it }.distinctPeople())
+                }
+                if (old != null) updatePersonEverywhere(old, action.person)
             }
             is EditorAction.RemovePerson -> updateState { st ->
                 st.copy(people = st.people.filterNot { it.id == action.id })
@@ -610,6 +642,12 @@ class EditorVM(
             is EditorAction.DeleteJournal -> deleteJournal()
             is EditorAction.RestoreJournal -> restoreJournal()
         }
+    }
+
+    /** A person is the same on every entry, so an edit made here is written to all of them. */
+    private fun updatePersonEverywhere(old: JournalPerson, updated: JournalPerson) {
+        if (old.name == updated.name && old.note == updated.note && old.contactLookupKey == updated.contactLookupKey) return
+        viewModelScope.launch { journalRepo.updatePerson(old, updated) }
     }
 
     private fun updateState(update: (EditorState) -> EditorState) {

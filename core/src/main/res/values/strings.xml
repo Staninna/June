@@ -523,8 +523,8 @@
     <string name="no_entries_filter_desc">No journals match the current filters.</string>
     <string name="no_tag_category_yet">No %1$s yet</string>
     <string name="no_tags_to_filter">No additional tags to filter by.</string>
-    <string name="people_desc">Track friends, family, or colleagues across entries.</string>
-    <string name="people_empty_msg">Who was there? (@name)</string>
+    <string name="people_desc">Who was there. Add a name, or pick someone from your contacts.</string>
+    <string name="people_empty_msg">Who was there?</string>
     <string name="rename_tag_title">Rename Tag</string>
     <string name="save_changes_title">Save Changes?</string>
     <string name="spaces_desc">Broad categories like Work, Travel, or Dream.</string>
@@ -730,6 +730,16 @@
     <string name="people_contacts_desc">Pick from your address book. No contacts permission needed</string>
     <string name="people_from_contacts_label">From your contacts</string>
     <string name="people_add_new_desc">New person</string>
+    <string name="people_remove_name">Remove %1$s</string>
+    <string name="people_everywhere_hint">Name, context and contact are the same on every entry with this person</string>
+    <string name="people_remove_everywhere">Remove from all entries</string>
+    <string name="people_delete_title">Remove person?</string>
+    <string name="people_delete_warning">This takes them off every entry. The entries themselves stay.</string>
+    <string name="people_open_contact">Open contact</string>
+    <plurals name="people_entry_count">
+        <item quantity="one">%1$d entry</item>
+        <item quantity="other">%1$d entries</item>
+    </plurals>
     <!-- Local AI (on-device model server, docs/LOCAL_LLM_API.md) -->
     <string name="local_ai">Local AI</string>
     <string name="local_ai_desc">Clean up dictated entries with a model running on this phone</string>

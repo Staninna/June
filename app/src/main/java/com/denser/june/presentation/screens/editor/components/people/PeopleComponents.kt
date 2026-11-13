@@ -249,21 +249,32 @@ fun EditorPeopleRow(
     }
 }
 
+/**
+ * A person as a chip: avatar, name and context. The same chip is used wherever people show up as
+ * labels. With [onRemove] it gets a close button; tapping the chip itself opens the person.
+ */
 @Composable
-private fun PersonChip(
+fun PersonChip(
     person: JournalPerson,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    color: Color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+    onRemove: (() -> Unit)? = null,
 ) {
     Surface(
         onClick = onClick,
         shape = RoundedCornerShape(50),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+        color = color,
         modifier = modifier.heightIn(min = 36.dp)
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(start = 3.dp, end = 12.dp, top = 3.dp, bottom = 3.dp)
+            modifier = Modifier.padding(
+                start = 3.dp,
+                end = if (onRemove != null) 2.dp else 12.dp,
+                top = 3.dp,
+                bottom = 3.dp
+            )
         ) {
             PersonAvatar(person, size = 30.dp)
             Spacer(Modifier.width(8.dp))
@@ -295,6 +306,55 @@ private fun PersonChip(
                     modifier = Modifier.size(14.dp)
                 )
             }
+            if (onRemove != null) {
+                IconButton(onClick = onRemove, modifier = Modifier.size(32.dp)) {
+                    Icon(
+                        painter = painterResource(R.drawable.close_24px),
+                        contentDescription = stringResource(R.string.people_remove_name, person.name),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** A known person offered for one-tap adding. */
+@Composable
+fun PersonSuggestionChip(
+    person: JournalPerson,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(50),
+        color = Color.Transparent,
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        modifier = modifier.heightIn(min = 32.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(start = 3.dp, end = 10.dp, top = 3.dp, bottom = 3.dp)
+        ) {
+            PersonAvatar(person, size = 26.dp)
+            Spacer(Modifier.width(6.dp))
+            Text(
+                text = person.name,
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.widthIn(max = 120.dp)
+            )
+            Spacer(Modifier.width(4.dp))
+            Icon(
+                painter = painterResource(R.drawable.add_24px),
+                contentDescription = stringResource(R.string.people_add_name, person.name),
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(16.dp)
+            )
         }
     }
 }
@@ -373,7 +433,10 @@ fun PeoplePickerSheet(
     val trimmed = query.trim()
 
     val pickContact = rememberContactPicker { picked ->
-        val existing = known.firstOrNull { it.contactLookupKey != null && it.contactLookupKey == picked.lookupKey }
+        val everyone = selected + known
+        val existing = everyone.firstOrNull { it.contactLookupKey != null && it.contactLookupKey == picked.lookupKey }
+            ?: everyone.firstOrNull { it.name.trim().equals(picked.name, ignoreCase = true) }
+                ?.copy(contactLookupKey = picked.lookupKey)
         haptics.performHapticFeedback(HapticFeedbackType.Confirm)
         onAdd(existing ?: JournalPerson(name = picked.name, contactLookupKey = picked.lookupKey))
     }
@@ -724,6 +787,8 @@ fun PersonDetailSheet(
     onSave: (JournalPerson) -> Unit,
     onRemove: (JournalPerson) -> Unit,
     onDismiss: () -> Unit,
+    /** What the destructive button says: leaving this entry, or leaving every entry. */
+    removeLabel: String = stringResource(R.string.people_remove),
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -790,6 +855,13 @@ fun PersonDetailSheet(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+            Text(
+                stringResource(R.string.people_everywhere_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(top = 6.dp, start = 24.dp, end = 24.dp)
+            )
             Spacer(Modifier.height(20.dp))
 
             val fieldColors = TextFieldDefaults.colors(
@@ -869,7 +941,7 @@ fun PersonDetailSheet(
                         modifier = Modifier.size(18.dp)
                     )
                     Spacer(Modifier.width(8.dp))
-                    Text(stringResource(R.string.people_remove), color = MaterialTheme.colorScheme.error)
+                    Text(removeLabel, color = MaterialTheme.colorScheme.error)
                 }
                 Spacer(Modifier.weight(1f))
                 FilledTonalButton(onClick = { close(save = true) }) {

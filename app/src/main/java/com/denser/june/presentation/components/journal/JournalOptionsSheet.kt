@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.dp
 import com.denser.june.core.R
 import com.denser.june.core.domain.model.Journal
 import com.denser.june.core.domain.model.enums.TagCategory
+import com.denser.june.presentation.screens.editor.components.people.PersonAvatar
 import com.denser.june.core.utils.toDayOfMonth
 import com.denser.june.core.utils.toFullDateTime
 import com.denser.june.core.utils.toShortMonth
@@ -424,11 +425,10 @@ fun JournalOptionsMetadataDetails(
     modifier: Modifier = Modifier
 ) {
     val spacesTags = remember(journal.tags) { TagUtils.filterTagsByCategory(journal.tags, TagCategory.Spaces) }
-    val peopleTags = remember(journal.tags) { TagUtils.filterTagsByCategory(journal.tags, TagCategory.People) }
     val topicsTags = remember(journal.tags) { TagUtils.filterTagsByCategory(journal.tags, TagCategory.Topics) }
 
     Column(modifier = modifier) {
-        if (spacesTags.isNotEmpty() || peopleTags.isNotEmpty() || topicsTags.isNotEmpty()) {
+        if (spacesTags.isNotEmpty() || journal.people.isNotEmpty() || topicsTags.isNotEmpty()) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -447,12 +447,13 @@ fun JournalOptionsMetadataDetails(
                         border = null
                     )
                 }
-                peopleTags.forEach { tag ->
+                journal.people.forEach { person ->
                     SuggestionChip(
                         onClick = {},
-                        label = { Text(tag, style = MaterialTheme.typography.labelMedium) },
+                        icon = { PersonAvatar(person, size = 20.dp) },
+                        label = { Text(person.name, style = MaterialTheme.typography.labelMedium) },
                         shape = RoundedCornerShape(12.dp),
-                        colors = TagUtils.getTagSuggestionChipColors(tag),
+                        colors = TagUtils.getTagSuggestionChipColors(person.label),
                         border = null
                     )
                 }

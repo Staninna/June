@@ -4,6 +4,7 @@ import com.charleskorn.kaml.Yaml
 import com.charleskorn.kaml.YamlConfiguration
 import com.denser.june.core.domain.logging.AppLogger
 import com.denser.june.core.domain.model.Journal
+import com.denser.june.core.domain.model.withUnifiedPeople
 import com.denser.june.core.domain.model.JournalLocation
 import com.denser.june.core.domain.model.SongDetails
 import kotlinx.serialization.Serializable
@@ -217,7 +218,7 @@ object MarkdownEngine {
             isBookmarked = frontmatter?.isBookmarked ?: frontmatter?.bookmarked ?: false,
             isArchived = frontmatter?.isArchived ?: frontmatter?.archived ?: false,
             isDraft = isDraft
-        )
+        ).withUnifiedPeople()
     }
 
     fun generateFileName(journal: Journal, forSingleExport: Boolean = false): String {

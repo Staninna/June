@@ -14,6 +14,9 @@ import com.denser.june.core.domain.repository.JournalRepository
 import com.denser.june.core.domain.model.Journal
 import com.denser.june.core.domain.model.JournalPerson
 import com.denser.june.core.domain.model.distinctPeople
+import com.denser.june.core.domain.model.labels
+import com.denser.june.core.domain.model.relabel
+import com.denser.june.core.domain.model.withUnifiedPeople
 import com.denser.june.core.domain.preferences.SyncPreferences
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -74,13 +77,13 @@ class JournalRepositoryImpl(
     }
 
     override suspend fun insertJournal(journal: Journal): String {
-        val journalToInsert = if (journal.id.isBlank()) {
+        val journalToInsert = (if (journal.id.isBlank()) {
             journal.copy(id = java.util.UUID.randomUUID().toString())
-        } else journal
+        } else journal).unifiedForStorage()
 
         transactionRunner {
             journalDao.insertJournal(journalToInsert.asEntity())
-            replaceJournalTags(journalToInsert.id, journalToInsert.tags)
+            replaceJournalTags(journalToInsert.id, journalToInsert.labels)
         }
         return journalToInsert.id
     }
@@ -129,14 +132,27 @@ class JournalRepositoryImpl(
     }
 
     override suspend fun updateJournal(journal: Journal) {
+        val unified = journal.unifiedForStorage()
         transactionRunner {
-            journalDao.updateJournal(journal.asEntity())
-            replaceJournalTags(journal.id, journal.tags)
+            journalDao.updateJournal(unified.asEntity())
+            replaceJournalTags(unified.id, unified.labels)
         }
     }
 
     /**
-     * Rewrites the tag rows for a single journal. Must run inside a transaction: the delete
+     * Folds `@name` tags into the entry's people before it is stored. An entry that still had
+     * such tags (a backup, or a copy synced from an older version) is stored as edited now, so
+     * sync uploads the new form instead of fetching the old one again on every run.
+     */
+    private fun Journal.unifiedForStorage(): Journal {
+        val unified = withUnifiedPeople()
+        return if (unified === this) this else unified.copy(updatedAt = System.currentTimeMillis())
+    }
+
+    /**
+     * Rewrites the tag rows for a single journal. The rows hold the journal's labels: its tags and
+     * each of its people as `@Name`, which is what makes people show up, count and filter like
+     * any other label. Must run inside a transaction: the delete
      * followed by the inserts used to be separate transactions, so a process death in between
      * could leave a journal without any tag cross references.
      *
@@ -192,9 +208,9 @@ class JournalRepositoryImpl(
             journalDao.deleteTag(trimmedOld)
 
             val updatedEntities = affectedJournals.mapNotNull { entity ->
-                val updatedTags = entity.tags.map { if (it == trimmedOld) trimmedNew else it }.distinct()
-                if (updatedTags != entity.tags) {
-                    entity.copy(tags = updatedTags, updatedAt = timestamp)
+                val updated = relabel(entity.tags, entity.people, trimmedOld, trimmedNew)
+                if (updated.tags != entity.tags || updated.people != entity.people) {
+                    entity.copy(tags = updated.tags, people = updated.people, updatedAt = timestamp)
                 } else {
                     null
                 }
@@ -219,11 +235,46 @@ class JournalRepositoryImpl(
 
             val updatedEntities = affectedJournals.mapNotNull { entity ->
                 val updatedTags = entity.tags.filter { it != trimmed }
-                if (updatedTags != entity.tags) {
-                    entity.copy(tags = updatedTags, updatedAt = timestamp)
+                val updatedPeople = entity.people.filter { it.label != trimmed }
+                if (updatedTags != entity.tags || updatedPeople != entity.people) {
+                    entity.copy(tags = updatedTags, people = updatedPeople, updatedAt = timestamp)
                 } else {
                     null
                 }
+            }
+
+            if (updatedEntities.isNotEmpty()) {
+                journalDao.updateJournals(updatedEntities)
+            }
+        }
+    }
+
+    override suspend fun updatePerson(old: JournalPerson, updated: JournalPerson) {
+        val name = updated.name.trim()
+        if (name.isEmpty()) return
+        val oldLabel = old.label
+        val newLabel = updated.copy(name = name).label
+
+        transactionRunner {
+            val timestamp = System.currentTimeMillis()
+            val affectedJournals = journalDao.getAllJournalsByTagNameSync(oldLabel)
+
+            if (oldLabel != newLabel) {
+                journalDao.insertTag(TagEntity(name = newLabel))
+                journalDao.copyTagCrossRefs(oldLabel, newLabel)
+                journalDao.deleteTagCrossRefs(oldLabel)
+                journalDao.deleteTag(oldLabel)
+            }
+
+            val updatedEntities = affectedJournals.mapNotNull { entity ->
+                val people = entity.people.map { person ->
+                    if (person.isSamePerson(old)) {
+                        person.copy(name = name, note = updated.note, contactLookupKey = updated.contactLookupKey)
+                    } else {
+                        person
+                    }
+                }.distinctPeople()
+                if (people != entity.people) entity.copy(people = people, updatedAt = timestamp) else null
             }
 
             if (updatedEntities.isNotEmpty()) {

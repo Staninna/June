@@ -306,8 +306,10 @@ fun EditorModals(
     if (dialogState.showTagsDialog) {
         JournalTagsDialog(
             tags = editorState.tags,
+            people = editorState.people,
+            knownPeople = editorState.knownPeople,
             suggestions = editorState.tagSuggestions,
-            onSaveTags = { newTags -> onAction(EditorAction.UpdateTags(newTags)) },
+            onSave = { newTags, newPeople -> onAction(EditorAction.UpdateLabels(newTags, newPeople)) },
             onSearchTags = { onAction(EditorAction.SearchTags(it)) },
             onDismiss = { dialogState.showTagsDialog = false }
         )
