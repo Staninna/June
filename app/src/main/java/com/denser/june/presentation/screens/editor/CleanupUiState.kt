@@ -1,6 +1,7 @@
 package com.denser.june.presentation.screens.editor
 
 import com.denser.june.core.localai.DictationCleanup
+import com.denser.june.core.localai.NameChoice
 import com.denser.june.core.localai.TextDiff
 
 /** State of the "Clean up dictation" flow. The entry is only changed by [EditorVM.acceptCleanup]. */
@@ -18,7 +19,15 @@ sealed interface CleanupUiState {
         val rewrite: String,
         val segments: List<TextDiff.Segment>,
         val changes: List<String>,
-    ) : CleanupUiState
+        /** Names in the rewrite that several people share. The user says who is meant. */
+        val choices: List<NameChoice> = emptyList(),
+        /** The answers so far, by [NameChoice.key]. No answer means the name is nobody's mention. */
+        val picks: Map<String, String?> = emptyMap(),
+    ) : CleanupUiState {
+        /** The rewrite with the answered names filled in: what accepting puts in the entry. */
+        val settled: String
+            get() = NameChoice.settle(rewrite, choices, picks)
+    }
 
     data class Problem(val kind: Kind, val message: String? = null) : CleanupUiState
 

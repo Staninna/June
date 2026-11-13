@@ -17,6 +17,8 @@ data class LocalAiSettings(
     /** A background job that was still running when June last looked, and what it was for. */
     val pendingJobId: String? = null,
     val pendingJobFingerprint: String? = null,
+    /** The review of a cleanup shows the text as in the entry (true) or as Markdown (false). */
+    val reviewFormatted: Boolean = true,
 ) {
     val isPaired: Boolean
         get() = !token.isNullOrBlank() && baseUrl != null
@@ -62,6 +64,8 @@ class LocalAiPreferences(context: Context) : LocalAiStore {
             it.copy(customSystemPrompt = p.takeIf { v -> v.isNotEmpty() && v != DictationPrompt.DEFAULT_SYSTEM_PROMPT })
         }
 
+    fun setReviewFormatted(formatted: Boolean) = update { it.copy(reviewFormatted = formatted) }
+
     fun restoreDefaults() = update { it.copy(customSystemPrompt = null) }
 
     private fun update(transform: (LocalAiSettings) -> LocalAiSettings) {
@@ -74,6 +78,7 @@ class LocalAiPreferences(context: Context) : LocalAiStore {
             putString(KEY_PROMPT, next.customSystemPrompt)
             putString(KEY_PENDING_JOB, next.pendingJobId)
             putString(KEY_PENDING_FINGERPRINT, next.pendingJobFingerprint)
+            putBoolean(KEY_REVIEW_FORMATTED, next.reviewFormatted)
         }
         _settings.value = next
     }
@@ -87,6 +92,7 @@ class LocalAiPreferences(context: Context) : LocalAiStore {
             customSystemPrompt = prefs.getString(KEY_PROMPT, null),
             pendingJobId = prefs.getString(KEY_PENDING_JOB, null),
             pendingJobFingerprint = prefs.getString(KEY_PENDING_FINGERPRINT, null),
+            reviewFormatted = prefs.getBoolean(KEY_REVIEW_FORMATTED, true),
         )
 
     companion object {
@@ -98,5 +104,6 @@ class LocalAiPreferences(context: Context) : LocalAiStore {
         private const val KEY_PROMPT = "system_prompt"
         private const val KEY_PENDING_JOB = "pending_job_id"
         private const val KEY_PENDING_FINGERPRINT = "pending_job_fingerprint"
+        private const val KEY_REVIEW_FORMATTED = "review_formatted"
     }
 }

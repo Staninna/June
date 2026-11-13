@@ -4,6 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.denser.june.core.domain.repository.JournalRepository
 import com.denser.june.core.domain.model.Journal
+import com.denser.june.core.domain.model.JournalPerson
+import com.denser.june.core.domain.model.labelKeys
 import com.denser.june.core.domain.model.enums.TagCategory
 import com.denser.june.core.domain.model.enums.TimeFormat
 import com.denser.june.core.domain.preferences.JournalPreferences
@@ -37,9 +39,23 @@ class TagsVM(
     val allUniqueTags: StateFlow<List<String>?> = repository.getUniqueTags()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
+    /** Everyone on the journal's entries. A person label (`@<id>`) stands for one of them. */
+    val knownPeople: StateFlow<List<JournalPerson>> = repository.getKnownPeople()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     val primaryTags: StateFlow<List<String>?> =
-        combine(allUniqueTags, _selectedCategory) { tags, category ->
-            tags?.let { TagUtils.filterTagsByCategory(it, category).sorted() }
+        combine(allUniqueTags, _selectedCategory, knownPeople) { tags, category, people ->
+            tags?.let {
+                val inCategory = TagUtils.filterTagsByCategory(it, category)
+                if (category != TagCategory.People) inCategory.sorted()
+                else {
+                    // people are listed by name; namesakes stay next to each other, by context
+                    val byKey = people.associateBy { p -> p.key }
+                    inCategory.mapNotNull { key -> byKey[key] }
+                        .sortedWith(compareBy({ p -> p.name.trim().lowercase() }, { p -> p.note.orEmpty().lowercase() }))
+                        .map { p -> p.key }
+                }
+            }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     init {
@@ -69,7 +85,7 @@ class TagsVM(
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     val availableFilters: StateFlow<List<String>> = journals.map { currentJournals ->
-        currentJournals?.flatMap { it.tags }
+        currentJournals?.flatMap { it.labelKeys }
             ?.distinct()
             ?.filter { it != _selectedPrimaryTag.value }
             ?.sorted() ?: emptyList()
@@ -102,6 +118,11 @@ class TagsVM(
         }
     }
 
+    /** Saves an edit to the selected person on every entry they are on. */
+    fun updatePerson(updated: JournalPerson) {
+        viewModelScope.launch { repository.updatePerson(updated) }
+    }
+
     fun deleteCurrentTag() {
         val currentTag = _selectedPrimaryTag.value ?: return
         val currentList = primaryTags.value ?: return
@@ -119,7 +140,8 @@ class TagsVM(
 
         viewModelScope.launch {
             _selectedPrimaryTag.value = nextTag
-            repository.deleteTag(currentTag)
+            if (JournalPerson.isPersonLabel(currentTag)) repository.removePerson(JournalPerson.nameFromLabel(currentTag))
+            else repository.deleteTag(currentTag)
         }
     }
 

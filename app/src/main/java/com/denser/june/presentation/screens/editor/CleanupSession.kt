@@ -1,5 +1,6 @@
 package com.denser.june.presentation.screens.editor
 
+import com.denser.june.core.localai.CleanupPerson
 import com.denser.june.core.localai.DictationCleanup
 import com.denser.june.core.localai.TextDiff
 import kotlinx.coroutines.CoroutineScope
@@ -28,6 +29,8 @@ class CleanupSession(private val cleanup: DictationCleanup) {
         /** True when [entryKey] is a journal id, so the entry can be opened from anywhere. */
         val canOpenEntry: Boolean = false,
         val state: CleanupUiState = CleanupUiState.Hidden,
+        /** The entry's text as it was sent. What is written after that is not in the rewrite. */
+        val source: String? = null,
         /** The sheet is put away; the run shows as a button or pill. */
         val minimized: Boolean = false,
         /** The key of the entry whose editor is on screen right now, if any. */
@@ -47,10 +50,12 @@ class CleanupSession(private val cleanup: DictationCleanup) {
     val snapshot: StateFlow<Snapshot> = _snapshot.asStateFlow()
 
     /** Starts a run for [entryKey]; a run that is still going is replaced. */
-    fun start(entryKey: String, canOpenEntry: Boolean, body: String, people: suspend () -> List<String>) {
+    fun start(entryKey: String, canOpenEntry: Boolean, body: String, people: suspend () -> List<CleanupPerson>) {
         job?.cancel()
         val working = CleanupUiState.Working()
-        _snapshot.update { it.copy(entryKey = entryKey, canOpenEntry = canOpenEntry, state = working, minimized = false) }
+        _snapshot.update {
+            it.copy(entryKey = entryKey, canOpenEntry = canOpenEntry, state = working, source = body, minimized = false)
+        }
         job =
             scope.launch {
                 val outcome =
@@ -67,6 +72,9 @@ class CleanupSession(private val cleanup: DictationCleanup) {
                                 rewrite = outcome.rewrite,
                                 segments = withContext(Dispatchers.Default) { TextDiff.diff(outcome.original, outcome.rewrite) },
                                 changes = outcome.changes,
+                                choices = outcome.choices,
+                                // a suggestion starts out picked; it is shown, so it is still the user's call
+                                picks = outcome.choices.associate { it.key to it.suggested },
                             )
                         DictationCleanup.Outcome.ServerUnavailable -> CleanupUiState.Problem(CleanupUiState.Kind.ServerUnavailable)
                         DictationCleanup.Outcome.NotPaired -> CleanupUiState.Problem(CleanupUiState.Kind.NotPaired)
@@ -85,8 +93,17 @@ class CleanupSession(private val cleanup: DictationCleanup) {
     fun cancel() {
         job?.cancel()
         job = null
-        _snapshot.update { it.copy(entryKey = null, canOpenEntry = false, state = CleanupUiState.Hidden, minimized = false) }
+        _snapshot.update {
+            it.copy(entryKey = null, canOpenEntry = false, state = CleanupUiState.Hidden, source = null, minimized = false)
+        }
     }
+
+    /** The user said who a shared name means, or with null that it is nobody's mention. */
+    fun pick(key: String, personId: String?) =
+        _snapshot.update { s ->
+            val review = s.state as? CleanupUiState.Review ?: return@update s
+            s.copy(state = review.copy(picks = review.picks + (key to personId)))
+        }
 
     /** The result was used or dismissed. */
     fun clear() = cancel()

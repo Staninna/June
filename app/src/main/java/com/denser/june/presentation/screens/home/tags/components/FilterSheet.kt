@@ -70,7 +70,9 @@ fun FilterBottomSheet(
     selectedFilters: Set<String>,
     onToggle: (String) -> Unit,
     onClearAll: () -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    /** What a label is called on screen. People are filed under an id, not under their name. */
+    labelText: (String) -> String = TagUtils::getCleanTagName
 ) {
     val groupedTags = remember(availableFilters) {
         availableFilters
@@ -139,7 +141,8 @@ fun FilterBottomSheet(
                             category = category,
                             tags = tags,
                             selectedFilters = selectedFilters,
-                            onToggle = onToggle
+                            onToggle = onToggle,
+                            labelText = labelText
                         )
                     }
                 }
@@ -171,7 +174,8 @@ private fun FilterCategorySection(
     category: TagCategory,
     tags: List<String>,
     selectedFilters: Set<String>,
-    onToggle: (String) -> Unit
+    onToggle: (String) -> Unit,
+    labelText: (String) -> String
 ) {
     val spec = TagUtils.getCategoryUiSpec(category)
 
@@ -207,7 +211,7 @@ private fun FilterCategorySection(
         ) {
             tags.forEach { tag ->
                 val isActive = tag in selectedFilters
-                val chipLabel = TagUtils.getCleanTagName(tag)
+                val chipLabel = labelText(tag)
 
                 FilterChip(
                     selected = isActive,

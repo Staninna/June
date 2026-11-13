@@ -64,6 +64,16 @@ import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import com.denser.june.core.localai.DictationCleanup
+import com.denser.june.core.localai.EditedMeanwhile
+import com.denser.june.core.localai.NameChoice
+import com.denser.june.core.domain.model.JournalPerson
+import com.denser.june.presentation.screens.editor.components.people.PersonAvatar
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.ui.text.style.TextOverflow
+import com.denser.june.presentation.components.JuneDialog
 import kotlinx.coroutines.delay
 import com.denser.june.core.R
 import com.denser.june.core.localai.TextDiff
@@ -71,8 +81,15 @@ import com.denser.june.presentation.components.JuneFloatingAction
 import com.denser.june.presentation.components.JuneFloatingActionBar
 import com.denser.june.presentation.components.JuneSelectableTabChip
 import com.denser.june.presentation.screens.editor.CleanupUiState
-
-private enum class ReviewTab { Changes, Original, Rewrite }
+import com.denser.june.presentation.screens.editor.components.RenderedReview
+import com.denser.june.presentation.screens.editor.components.ReviewView
+import com.denser.june.presentation.screens.editor.components.appendReview
+import com.denser.june.presentation.screens.editor.components.juneEntryStyleConfig
+import androidx.compose.material3.FilledTonalIconToggleButton
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.font.FontFamily
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 private val MENTION = Regex("""\[@([^\]]*)]\(person:[^)]*\)""")
 
@@ -88,9 +105,17 @@ fun CleanupReviewSheet(
     onRetry: () -> Unit,
     onCancel: () -> Unit,
     onMinimize: () -> Unit,
-    isStale: Boolean,
+    /** What was written in the entry since the cleanup started. */
+    edits: EditedMeanwhile,
     onOpenServer: (() -> Unit)?,
     onOpenSettings: () -> Unit,
+    /** The answer to who a shared name means: its key and the person's id, or null for nobody. */
+    onPickPerson: (String, String?) -> Unit = { _, _ -> },
+    /** Show the texts as in the entry (true) or as Markdown (false). */
+    formatted: Boolean = true,
+    onFormattedChange: (Boolean) -> Unit = {},
+    /** The font of the entry, so the review reads like the entry will. */
+    fontFamily: FontFamily? = null,
 ) {
     if (state is CleanupUiState.Hidden) return
     // Swiping the sheet down, a tap next to it or Back only puts it away: the cleanup carries on
@@ -120,7 +145,8 @@ fun CleanupReviewSheet(
                 when (s) {
                     is CleanupUiState.Working -> WorkingContent(s, onCancel, onMinimize)
                     is CleanupUiState.Problem -> ProblemContent(s, onRetry, onCancel, onOpenServer, onOpenSettings)
-                    is CleanupUiState.Review -> ReviewContent(s, maxHeight, isStale, onAccept, onRetry, onCancel)
+                    is CleanupUiState.Review ->
+                        ReviewContent(s, maxHeight, edits, onAccept, onRetry, onCancel, formatted, onFormattedChange, fontFamily, onPickPerson)
                     CleanupUiState.Hidden -> Spacer(Modifier.height(1.dp))
                 }
             }
@@ -227,13 +253,6 @@ private fun WorkingContent(state: CleanupUiState.Working, onCancel: () -> Unit, 
         } else {
             LinearWavyProgressIndicator(Modifier.fillMaxWidth())
         }
-        Spacer(Modifier.height(16.dp))
-        Text(
-            stringResource(R.string.cleanup_working_desc),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
-        )
         Spacer(Modifier.height(28.dp))
         JuneFloatingActionBar {
             JuneFloatingAction(
@@ -345,12 +364,39 @@ private fun ProblemContent(
 private fun ReviewContent(
     state: CleanupUiState.Review,
     maxHeight: androidx.compose.ui.unit.Dp,
-    isStale: Boolean,
+    edits: EditedMeanwhile,
     onAccept: () -> Unit,
     onRetry: () -> Unit,
     onCancel: () -> Unit,
+    formatted: Boolean,
+    onFormattedChange: (Boolean) -> Unit,
+    fontFamily: FontFamily?,
+    onPickPerson: (String, String?) -> Unit,
 ) {
-    var tab by rememberSaveable { mutableStateOf(ReviewTab.Changes) }
+    var tab by rememberSaveable { mutableStateOf(ReviewView.Changes) }
+    var confirmReplace by remember { mutableStateOf(false) }
+
+    // The earlier text was changed after it was sent: accepting would undo those changes. Ask.
+    if (confirmReplace) {
+        JuneDialog(
+            onDismissRequest = { confirmReplace = false },
+            title = stringResource(R.string.cleanup_replace_title),
+            icon = R.drawable.edit_24px,
+            text = { Text(stringResource(R.string.cleanup_replace_desc)) },
+            confirmButton = {
+                Button(onClick = {
+                    confirmReplace = false
+                    onRetry()
+                }) { Text(stringResource(R.string.cleanup_again)) }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = {
+                    confirmReplace = false
+                    onAccept()
+                }) { Text(stringResource(R.string.cleanup_replace)) }
+            },
+        )
+    }
     val scheme = MaterialTheme.colorScheme
     val added = SpanStyle(background = scheme.primaryContainer, color = scheme.onPrimaryContainer)
     val removed =
@@ -360,19 +406,31 @@ private fun ReviewContent(
             textDecoration = TextDecoration.LineThrough,
         )
     val mention = SpanStyle(color = scheme.primary, fontWeight = FontWeight.Medium)
+    val entryStyles = juneEntryStyleConfig()
+
+    // Parsing and comparing a long entry takes a moment: not on the frame that opens the sheet.
+    val review by
+        produceState<RenderedReview?>(null, state.original, state.rewrite) {
+            value = withContext(Dispatchers.Default) { RenderedReview.of(state.original, state.rewrite) }
+        }
+    val shown = review.takeIf { formatted }
 
     val text: AnnotatedString =
-        remember(state, tab, scheme) {
+        remember(state, tab, scheme, shown, entryStyles) {
             buildAnnotatedString {
-                for (seg in state.segments) {
-                    val style =
-                        when (seg.op) {
-                            TextDiff.Op.Equal -> null
-                            TextDiff.Op.Added -> if (tab == ReviewTab.Original) continue else added
-                            TextDiff.Op.Removed -> if (tab == ReviewTab.Rewrite) continue else removed
-                        }
-                    if (style != null) withStyle(style) { appendWithMentions(seg.text, mention) }
-                    else appendWithMentions(seg.text, mention)
+                if (shown != null) {
+                    appendReview(shown, tab, entryStyles, added, removed)
+                } else {
+                    for (seg in state.segments) {
+                        val style =
+                            when (seg.op) {
+                                TextDiff.Op.Equal -> null
+                                TextDiff.Op.Added -> if (tab == ReviewView.Original) continue else added.takeIf { tab == ReviewView.Changes }
+                                TextDiff.Op.Removed -> if (tab == ReviewView.Rewrite) continue else removed.takeIf { tab == ReviewView.Changes }
+                            }
+                        if (style != null) withStyle(style) { appendWithMentions(seg.text, mention) }
+                        else appendWithMentions(seg.text, mention)
+                    }
                 }
             }
         }
@@ -385,45 +443,55 @@ private fun ReviewContent(
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.semantics { heading() },
             )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                stringResource(R.string.cleanup_review_desc),
-                style = MaterialTheme.typography.bodyMedium,
-                color = scheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-            )
-            if (isStale) {
+            if (edits == EditedMeanwhile.Changed) {
                 Spacer(Modifier.height(12.dp))
                 Surface(
                     shape = RoundedCornerShape(16.dp),
-                    color = scheme.tertiaryContainer,
-                    contentColor = scheme.onTertiaryContainer,
+                    color = scheme.errorContainer,
+                    contentColor = scheme.onErrorContainer,
+                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
                 ) {
                     Text(
-                        stringResource(R.string.cleanup_stale),
+                        stringResource(R.string.cleanup_changed),
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
                     )
                 }
             }
         }
-        Row(
-            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
-        ) {
-            ReviewTab.entries.forEach { t ->
-                JuneSelectableTabChip(
-                    item = t,
-                    label =
-                        stringResource(
-                            when (t) {
-                                ReviewTab.Changes -> R.string.cleanup_tab_changes
-                                ReviewTab.Original -> R.string.cleanup_tab_original
-                                ReviewTab.Rewrite -> R.string.cleanup_tab_rewrite
-                            }
-                        ),
-                    isSelected = tab == t,
-                    onSelect = { tab = it },
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                ReviewView.entries.forEach { t ->
+                    JuneSelectableTabChip(
+                        item = t,
+                        label =
+                            stringResource(
+                                when (t) {
+                                    ReviewView.Changes -> R.string.cleanup_tab_changes
+                                    ReviewView.Original -> R.string.cleanup_tab_original
+                                    ReviewView.Rewrite -> R.string.cleanup_tab_rewrite
+                                }
+                            ),
+                        isSelected = tab == t,
+                        onSelect = { tab = it },
+                    )
+                }
+            }
+            Spacer(Modifier.width(8.dp))
+            // As in the entry, or the Markdown behind it. The icon shows what a tap switches to.
+            val switchLabel = stringResource(if (formatted) R.string.cleanup_view_markdown else R.string.cleanup_view_formatted)
+            FilledTonalIconToggleButton(
+                checked = !formatted,
+                onCheckedChange = { onFormattedChange(!it) },
+                modifier = Modifier.semantics { stateDescription = switchLabel },
+            ) {
+                Icon(
+                    painterResource(if (formatted) R.drawable.markdown_24px else R.drawable.article_24px),
+                    contentDescription = switchLabel,
+                    modifier = Modifier.size(20.dp),
                 )
             }
         }
@@ -436,9 +504,43 @@ private fun ReviewContent(
             SelectionContainer {
                 Text(
                     text,
-                    style = MaterialTheme.typography.bodyLarge,
+                    style =
+                        if (formatted) {
+                            // the entry's own font and text colour, as the editor uses them
+                            MaterialTheme.typography.bodyLarge.copy(
+                                fontFamily = fontFamily ?: MaterialTheme.typography.bodyLarge.fontFamily,
+                                color = scheme.onSurface.copy(alpha = 0.8f),
+                            )
+                        } else {
+                            MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace)
+                        },
                     modifier = Modifier.verticalScroll(rememberScrollState()).padding(20.dp),
                 )
+            }
+        }
+        state.choices.forEach { choice ->
+            Spacer(Modifier.height(8.dp))
+            WhoIsMeant(choice, picked = state.picks[choice.key], onPick = { onPickPerson(choice.key, it) })
+        }
+        if (edits is EditedMeanwhile.Added) {
+            // Written while the cleanup ran: not in the rewrite, and not lost. It goes after it.
+            Spacer(Modifier.height(8.dp))
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = scheme.tertiaryContainer.copy(alpha = 0.6f),
+                contentColor = scheme.onTertiaryContainer,
+                modifier = Modifier.fillMaxWidth().semantics(mergeDescendants = true) {},
+            ) {
+                Column(Modifier.padding(horizontal = 20.dp, vertical = 12.dp)) {
+                    Text(stringResource(R.string.cleanup_kept), style = MaterialTheme.typography.labelLarge)
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        edits.text,
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
         }
         if (state.changes.isNotEmpty()) {
@@ -467,10 +569,55 @@ private fun ReviewContent(
                 contentColor = scheme.onSecondaryContainer,
             )
             JuneFloatingAction(
-                onClick = onAccept,
+                onClick = { if (edits == EditedMeanwhile.Changed) confirmReplace = true else onAccept() },
                 label = stringResource(R.string.cleanup_accept),
                 icon = { Icon(painterResource(R.drawable.check_24px), contentDescription = null) },
             )
+        }
+    }
+}
+
+/**
+ * Several people have this name, and the rewrite cannot know which one was meant. The user says
+ * who, or that it is none of them, in which case the name stays plain text.
+ */
+@Composable
+private fun WhoIsMeant(choice: NameChoice, picked: String?, onPick: (String?) -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        color = scheme.secondaryContainer.copy(alpha = 0.5f),
+        contentColor = scheme.onSecondaryContainer,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(Modifier.padding(vertical = 12.dp)) {
+            Text(
+                stringResource(R.string.cleanup_who_is, choice.name),
+                style = MaterialTheme.typography.labelLarge,
+                modifier = Modifier.padding(horizontal = 20.dp).semantics { heading() },
+            )
+            Spacer(Modifier.height(8.dp))
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp).selectableGroup(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                choice.candidates.forEach { candidate ->
+                    val person = JournalPerson(id = candidate.id, name = candidate.name, note = candidate.note)
+                    FilterChip(
+                        selected = picked == candidate.id,
+                        onClick = { onPick(candidate.id) },
+                        leadingIcon = { PersonAvatar(person, size = 24.dp) },
+                        label = { Text(person.displayName) },
+                        shape = CircleShape,
+                    )
+                }
+                FilterChip(
+                    selected = choice.candidates.none { it.id == picked },
+                    onClick = { onPick(null) },
+                    label = { Text(stringResource(R.string.cleanup_who_nobody)) },
+                    shape = CircleShape,
+                )
+            }
         }
     }
 }

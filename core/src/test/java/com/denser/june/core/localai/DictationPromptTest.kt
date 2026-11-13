@@ -7,17 +7,21 @@ import org.junit.Test
 
 class DictationPromptTest {
     @Test
-    fun `people come from People tags only`() {
-        val tags = listOf("@Noor", "#work", "Home", "@Emma", "@emma", "@ ")
-        assertEquals(listOf("Emma", "emma", "Noor"), DictationPrompt.peopleFromTags(tags))
+    fun `names are listed once, however many people share them`() {
+        val people = listOf(
+            CleanupPerson("1", "Noor"), CleanupPerson("2", "Bart", "Brother"), CleanupPerson("3", "bart", "Work"), CleanupPerson("4", " "),
+        )
+        assertEquals(listOf("Bart", "Noor"), DictationPrompt.names(people))
     }
 
     @Test
-    fun `known people merge tags and entry people`() {
-        assertEquals(
-            listOf("Emma", "Noor", "Sam de Vries"),
-            DictationPrompt.knownPeople(listOf("@Emma", "#work"), listOf("emma", "Sam de Vries", " ", "Noor")),
-        )
+    fun `the rule about numbered names is only sent when the entry needs it`() {
+        val plain = DictationPrompt.buildSystemPrompt(DictationPrompt.DEFAULT_SYSTEM_PROMPT, listOf("Bart"), "Met @Bart.")
+        val numbered = DictationPrompt.buildSystemPrompt(DictationPrompt.DEFAULT_SYSTEM_PROMPT, listOf("Bart", "Bart2"), "@Bart met @Bart2.", numberedNames = true)
+        assertFalse(plain.contains("Bart2"))
+        assertFalse(DictationPrompt.DEFAULT_SYSTEM_PROMPT.contains("share a name"))
+        assertTrue(numbered.contains("share a name"))
+        assertTrue(numbered.contains("Bart and Bart2"))
     }
 
     @Test
@@ -39,7 +43,7 @@ class DictationPromptTest {
         for (mark in listOf("**bold**", "*italic*", "__underline__", "~~strikethrough~~", "==highlight==", "`code`", "- [ ]", "1.", ">", "#", "---", "```", "|", "[text](address)", "![name](file)")) {
             assertTrue("missing $mark", p.contains(mark))
         }
-        assertTrue(p.contains("My friends are Emma and Noor."))
+        assertTrue(p.contains("The people I know are Emma and Noor."))
     }
 
     @Test
@@ -57,7 +61,7 @@ class DictationPromptTest {
 
         // everything before the people is the same text, so the server can reuse it
         val other = DictationPrompt.buildSystemPrompt(DictationPrompt.DEFAULT_SYSTEM_PROMPT, listOf("Noor", "Sam"), "another plain entry")
-        assertEquals(plain.substringBefore("My friends are"), other.substringBefore("My friends are"))
+        assertEquals(plain.substringBefore("The people I know are"), other.substringBefore("The people I know are"))
     }
 
     @Test

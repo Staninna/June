@@ -13,7 +13,8 @@ package com.denser.june.core.localai
  */
 object OutputValidator {
 
-    data class Result(val text: String, val changes: List<String>)
+    /** @param choices names in [text] that several people share, for the user to say who is meant. */
+    data class Result(val text: String, val changes: List<String>, val choices: List<NameChoice> = emptyList())
 
     private val INVISIBLE = Regex("[​‎‏⁠﻿]")
     private val NBSP = Regex("[   ]")
@@ -27,6 +28,9 @@ object OutputValidator {
     private val WIKI_IMAGE = Regex("""!\[\[[^\[\]]+\]\]""")
     private val CHECKBOX = Regex("""(?m)^[ \t]*[-*][ \u00A0]\[[ xX]\](?=[ \u00A0])""")
     private val BARE_MENTION = Regex("""(?<![\w@\[])@([\p{L}\p{N}_'-]+)""")
+    private val WORD = Regex("""[\p{L}\p{N}]+""")
+    /** How far around a name its context is looked for, in characters. */
+    private const val CONTEXT = 80
     private val PLACEHOLDER = Regex("(\\d+)")
 
     private val PREAMBLE =
@@ -48,11 +52,13 @@ object OutputValidator {
      */
     fun validate(
         raw: String,
-        knownPeople: Collection<String>,
+        knownPeople: Collection<CleanupPerson>,
         linkPlainNames: Boolean = true,
         topics: Map<String, String> = emptyMap(),
         /** The notes as they were sent. What looks like commentary but is in the notes is kept. */
         original: String? = null,
+        /** Who the names in the notes stood for ([DictationPrompt.Simplified.mentions]). */
+        mentions: Map<String, String> = emptyMap(),
     ): Result {
         val changes = mutableListOf<String>()
         var text = raw.replace("\r\n", "\n").replace('\r', '\n')
@@ -72,23 +78,55 @@ object OutputValidator {
         text = stripWrappingQuotes(text)
 
         // --- mentions ---------------------------------------------------------------------------
-        val people = knownPeople.map { it.trim() }.filter { it.isNotEmpty() }
-        fun canonical(name: String): String? {
-            val n = name.trim().removePrefix("@").trim()
-            return people.firstOrNull { it.equals(n, ignoreCase = true) }
+        val people = knownPeople.filter { it.name.isNotBlank() }
+        val byId = people.associateBy { it.id }
+        val names = DictationPrompt.names(people)
+        val saidAs = mentions.entries.associate { it.key.removePrefix("@").trim().lowercase() to it.value }
+        val idsInNotes = mentions.values.toSet()
+        val open = LinkedHashMap<String, NameChoice>()
+        fun code(p: CleanupPerson) = "[@${p.name.trim()}](person:${p.id})"
+
+        /**
+         * Who [name] means. A name from the notes is the person it stood for there. A name only one
+         * person has is that person. A name several people share is not decided here: it is left
+         * open as a [NameChoice] for the user to answer, with a suggestion when something points
+         * to one of them: their context ("brother", "work") is said near the name, they are the
+         * only one on this entry, or the only one already mentioned in the notes.
+         */
+        fun who(name: String, context: String): CleanupPerson? {
+            var n = name.trim().removePrefix("@").trim()
+            if (n.isEmpty()) return null
+            saidAs[n.lowercase()]?.let { id ->
+                byId[id]?.let { return it }
+                // an older mention carries a name where the id should be: look that name up
+                n = id
+            }
+            val candidates = people.filter { it.name.trim().equals(n, ignoreCase = true) }
+            if (candidates.size <= 1) return candidates.firstOrNull()
+            val nearby = WORD.findAll(context.lowercase()).map { it.value }.toSet()
+            val suggested =
+                candidates.filter { c -> WORD.findAll(c.note.orEmpty().lowercase()).any { it.value.length >= 3 && it.value in nearby } }.singleOrNull()
+                    ?: candidates.filter { it.onEntry }.singleOrNull()
+                    ?: candidates.filter { it.id in idsInNotes }.singleOrNull()
+            val choice = NameChoice(candidates.first().name.trim(), candidates, suggested?.id)
+            // the name can come up more than once: one question, and no suggestion if they disagree
+            open[choice.key] = open[choice.key]?.let { if (it.suggested == choice.suggested) it else it.copy(suggested = null) } ?: choice
+            return CleanupPerson(id = choice.key, name = choice.name)
         }
+        fun around(range: IntRange): String =
+            text.substring((range.first - CONTEXT).coerceAtLeast(0), (range.last + 1 + CONTEXT).coerceAtMost(text.length))
 
         // Replace mentions innermost-first with placeholders so broken nested codes such as
         // [[@Emm](person:Emma)a](person:Emma) collapse into one mention.
-        data class Mention(val display: String, val id: String)
-        val mentions = mutableListOf<Mention>()
+        data class Mention(val display: String, val id: String, val context: String = "")
+        val found = mutableListOf<Mention>()
         var guard = 0
         while (guard++ < 20) {
             val next =
                 INNER_MENTION.replace(text) { m ->
-                    val display = PLACEHOLDER.replace(m.groupValues[1]) { p -> mentions[p.groupValues[1].toInt()].display }
-                    mentions += Mention(display, m.groupValues[2].trim())
-                    "${mentions.size - 1}"
+                    val display = PLACEHOLDER.replace(m.groupValues[1]) { p -> found[p.groupValues[1].toInt()].display }
+                    found += Mention(display, m.groupValues[2].trim(), around(m.range))
+                    "${found.size - 1}"
                 }
             if (next == text) break
             text = next
@@ -96,11 +134,11 @@ object OutputValidator {
         // collapse a placeholder directly nested in another one's display (already merged above)
         val rendered = mutableMapOf<Int, String>()
         var unknown = 0
-        mentions.forEachIndexed { i, m ->
-            val name = canonical(m.id) ?: canonical(m.display)
+        found.forEachIndexed { i, m ->
+            val person = byId[m.id] ?: who(m.id, m.context) ?: who(m.display, m.context)
             rendered[i] =
-                if (name != null) {
-                    "[@$name](person:$name)"
+                if (person != null) {
+                    code(person)
                 } else {
                     unknown++
                     m.display.removePrefix("@").trim().ifEmpty { m.id }
@@ -109,7 +147,7 @@ object OutputValidator {
         if (unknown > 0) changes += "converted $unknown unknown mention(s) to plain text"
 
         // Links, pictures and checkboxes are valid markup with square brackets. They are set aside
-        // under their own marker, so the emphasis rule for mentions below leaves them alone.
+        // under their own marker, so the emphasis rule for found below leaves them alone.
         val kept = mutableListOf<String>()
         for (re in listOf(WIKI_IMAGE, LINK, CHECKBOX)) {
             text =
@@ -122,40 +160,41 @@ object OutputValidator {
         // topic codes the model wrote out in full are kept as they are
         text =
             TOPIC_CODE.replace(text) { m ->
-                mentions += Mention(m.groupValues[1], m.groupValues[2].trim())
-                rendered[mentions.size - 1] = "[${m.groupValues[1]}](topic:${m.groupValues[2].trim()})"
-                "\uE000${mentions.size - 1}\uE001"
+                found += Mention(m.groupValues[1], m.groupValues[2].trim())
+                rendered[found.size - 1] = "[${m.groupValues[1]}](topic:${m.groupValues[2].trim()})"
+                "\uE000${found.size - 1}\uE001"
             }
         // "#awake" as it was sent to the model (DictationPrompt.simplify) becomes the code again
         for ((display, id) in topics.entries.sortedByDescending { it.key.length }) {
             val re = Regex("""(?<![\p{L}\p{N}_&/\uE000])""" + Regex.escape(display) + """(?![\p{L}\p{N}_-])""")
             text =
                 re.replace(text) {
-                    mentions += Mention(display, id)
-                    rendered[mentions.size - 1] = "[$display](topic:$id)"
-                    "\uE000${mentions.size - 1}\uE001"
+                    found += Mention(display, id)
+                    rendered[found.size - 1] = "[$display](topic:$id)"
+                    "\uE000${found.size - 1}\uE001"
                 }
         }
 
         // "@First Last": names of more than one word, which the pattern below cannot see
-        for (name in people.filter { it.contains(' ') }.sortedByDescending { it.length }) {
+        for (name in names.filter { it.contains(' ') }.sortedByDescending { it.length }) {
             val re = Regex("""(?<![\w@\[])@""" + Regex.escape(name) + """(?![\p{L}\p{N}_])""", RegexOption.IGNORE_CASE)
             text =
-                re.replace(text) {
-                    mentions += Mention("@$name", name)
-                    rendered[mentions.size - 1] = "[@$name](person:$name)"
-                    "\uE000${mentions.size - 1}\uE001"
+                re.replace(text) { m ->
+                    val person = who(name, around(m.range)) ?: return@replace m.value
+                    found += Mention("@$name", person.id)
+                    rendered[found.size - 1] = code(person)
+                    "\uE000${found.size - 1}\uE001"
                 }
         }
 
         // bare "@Name": Hyphen would turn it into a mention on its own
         text =
             BARE_MENTION.replace(text) { m ->
-                val name = canonical(m.groupValues[1])
-                if (name != null) {
-                    mentions += Mention("@$name", name)
-                    rendered[mentions.size - 1] = "[@$name](person:$name)"
-                    "${mentions.size - 1}"
+                val person = who(m.groupValues[1], around(m.range))
+                if (person != null) {
+                    found += Mention("@${person.name}", person.id)
+                    rendered[found.size - 1] = code(person)
+                    "${found.size - 1}"
                 } else {
                     changes += "removed @ from ${m.groupValues[1]}"
                     m.groupValues[1]
@@ -165,14 +204,15 @@ object OutputValidator {
         // plain known names -> codes (whole word, same capitalisation as the People tag)
         if (linkPlainNames && people.isNotEmpty()) {
             var linked = 0
-            for (name in people.sortedByDescending { it.length }) {
+            for (name in names.sortedByDescending { it.length }) {
                 val re = Regex("""(?<![\p{L}\p{N}_@\uE000-\uE001])""" + Regex.escape(name) + """(?![\p{L}\p{N}_\uE001])""")
                 text =
-                    re.replace(text) {
+                    re.replace(text) { m ->
+                        val person = who(name, around(m.range)) ?: return@replace m.value
                         linked++
-                        mentions += Mention("@$name", name)
-                        rendered[mentions.size - 1] = "[@$name](person:$name)"
-                        "\uE000${mentions.size - 1}\uE001"
+                        found += Mention("@$name", person.id)
+                        rendered[found.size - 1] = code(person)
+                        "\uE000${found.size - 1}\uE001"
                     }
             }
             if (linked > 0) changes += "linked $linked name(s) to People"
@@ -181,14 +221,14 @@ object OutputValidator {
         // emphasis wrapping a mention breaks Hyphen's parser: drop those markers
         val beforeEmphasis = text
         text = unwrapEmphasisAroundMentions(text)
-        if (text != beforeEmphasis) changes += "removed emphasis around mentions"
+        if (text != beforeEmphasis) changes += "removed emphasis around found"
 
         // any remaining square bracket would derail the mention regex
         val noBrackets = text.replace("[", "").replace("]", "")
         if (noBrackets != text) changes += "removed square brackets"
         text = noBrackets
 
-        // restore unknown mentions first as plain text, then known ones as clean codes
+        // restore unknown found first as plain text, then known ones as clean codes
         text = PLACEHOLDER.replace(text) { p -> rendered[p.groupValues[1].toInt()] ?: "" }
         text = KEPT.replace(text) { p -> kept[p.groupValues[1].toInt()] }
 
@@ -199,7 +239,7 @@ object OutputValidator {
                 // not at the start of a line: indentation belongs to nested lists
                 .replace(Regex("(?<=\\S)[ \t]{2,}"), " ")
                 .trim()
-        return Result(text, changes.distinct())
+        return Result(text, changes.distinct(), open.values.filter { text.contains("(person:${it.key})") })
     }
 
     private fun stripCodeFence(text: String): String {

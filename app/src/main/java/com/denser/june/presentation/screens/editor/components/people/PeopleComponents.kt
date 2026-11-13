@@ -78,13 +78,21 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.denser.june.core.R
 import com.denser.june.core.domain.model.JournalPerson
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.layout.ContentScale
+import androidx.core.content.ContextCompat
+import coil.compose.AsyncImage
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextAlign
 import com.denser.june.presentation.components.JuneConnectedItem
 import com.denser.june.presentation.components.JuneConnectedRowItem
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.absoluteValue
 
 // -------------------------------------------------------------------------------------------------
@@ -131,6 +139,8 @@ fun PersonAvatar(
     size: Dp = 40.dp,
 ) {
     val style = avatarStyleFor(person)
+    val context = LocalContext.current
+    val lookupKey = person.contactLookupKey
     Box(
         modifier = modifier
             .size(size)
@@ -145,6 +155,16 @@ fun PersonAvatar(
             fontSize = (size.value * 0.36f).sp,
             maxLines = 1
         )
+        // The contact's own photo, when June may read contacts and the contact has one.
+        // Without either, nothing is drawn here and the initials show.
+        if (lookupKey != null && ContactsAccess.isGranted(context)) {
+            AsyncImage(
+                model = contactPhotoUri(lookupKey),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.matchParentSize()
+            )
+        }
     }
 }
 
@@ -249,21 +269,32 @@ fun EditorPeopleRow(
     }
 }
 
+/**
+ * A person as a chip: avatar, name and context. The same chip is used wherever people show up as
+ * labels. With [onRemove] it gets a close button; tapping the chip itself opens the person.
+ */
 @Composable
-private fun PersonChip(
+fun PersonChip(
     person: JournalPerson,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    color: Color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+    onRemove: (() -> Unit)? = null,
 ) {
     Surface(
         onClick = onClick,
         shape = RoundedCornerShape(50),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+        color = color,
         modifier = modifier.heightIn(min = 36.dp)
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(start = 3.dp, end = 12.dp, top = 3.dp, bottom = 3.dp)
+            modifier = Modifier.padding(
+                start = 3.dp,
+                end = if (onRemove != null) 2.dp else 12.dp,
+                top = 3.dp,
+                bottom = 3.dp
+            )
         ) {
             PersonAvatar(person, size = 30.dp)
             Spacer(Modifier.width(8.dp))
@@ -295,6 +326,57 @@ private fun PersonChip(
                     modifier = Modifier.size(14.dp)
                 )
             }
+            if (onRemove != null) {
+                IconButton(onClick = onRemove, modifier = Modifier.size(32.dp)) {
+                    Icon(
+                        painter = painterResource(R.drawable.close_24px),
+                        contentDescription = stringResource(R.string.people_remove_name, person.name),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** A known person offered for one-tap adding. */
+@Composable
+fun PersonSuggestionChip(
+    person: JournalPerson,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    /** Someone else has the same name: show the context too ("Bart · Work"). */
+    showContext: Boolean = false,
+) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(50),
+        color = Color.Transparent,
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        modifier = modifier.heightIn(min = 32.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(start = 3.dp, end = 10.dp, top = 3.dp, bottom = 3.dp)
+        ) {
+            PersonAvatar(person, size = 26.dp)
+            Spacer(Modifier.width(6.dp))
+            Text(
+                text = if (showContext) person.displayName else person.name,
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.widthIn(max = 180.dp)
+            )
+            Spacer(Modifier.width(4.dp))
+            Icon(
+                painter = painterResource(R.drawable.add_24px),
+                contentDescription = stringResource(R.string.people_add_name, person.name),
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(16.dp)
+            )
         }
     }
 }
@@ -304,6 +386,68 @@ private fun PersonChip(
 // -------------------------------------------------------------------------------------------------
 
 private data class PickedContact(val name: String, val lookupKey: String?)
+
+/**
+ * Whether June may read contacts. It never needs to: picking and opening a contact work without.
+ * With it, a linked contact's photo is shown and their context is filled in from the contact.
+ */
+object ContactsAccess {
+    private var asked by mutableStateOf(0)
+
+    fun isGranted(context: Context): Boolean {
+        asked // read, so everything showing contact details updates once access is given
+        return ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED
+    }
+
+    /** Call after the permission dialog was answered. */
+    fun answered() {
+        asked++
+    }
+}
+
+fun contactPhotoUri(lookupKey: String): Uri =
+    Uri.withAppendedPath(
+        Uri.withAppendedPath(ContactsContract.Contacts.CONTENT_LOOKUP_URI, lookupKey),
+        ContactsContract.Contacts.Photo.CONTENT_DIRECTORY
+    )
+
+/**
+ * What the contact itself says about who this is: "Acme · Engineer" from the organisation, or
+ * else the nickname. Null without access to contacts, or when the contact has neither.
+ */
+fun contactContext(context: Context, lookupKey: String): String? {
+    if (!ContactsAccess.isGranted(context)) return null
+    return runCatching {
+        val org = ContactsContract.CommonDataKinds.Organization.CONTENT_ITEM_TYPE
+        val nick = ContactsContract.CommonDataKinds.Nickname.CONTENT_ITEM_TYPE
+        var company: String? = null
+        var title: String? = null
+        var nickname: String? = null
+        context.contentResolver.query(
+            ContactsContract.Data.CONTENT_URI,
+            arrayOf(
+                ContactsContract.Data.MIMETYPE,
+                ContactsContract.CommonDataKinds.Organization.COMPANY,
+                ContactsContract.CommonDataKinds.Organization.TITLE,
+            ),
+            "${ContactsContract.Data.LOOKUP_KEY} = ? AND ${ContactsContract.Data.MIMETYPE} IN (?, ?)",
+            arrayOf(lookupKey, org, nick),
+            null
+        )?.use { c ->
+            while (c.moveToNext()) {
+                when (c.getString(0)) {
+                    org -> {
+                        company = company ?: c.getString(1)?.trim()?.takeIf { it.isNotEmpty() }
+                        title = title ?: c.getString(2)?.trim()?.takeIf { it.isNotEmpty() }
+                    }
+                    // a nickname is stored in the same column an organisation keeps its company in
+                    nick -> nickname = nickname ?: c.getString(1)?.trim()?.takeIf { it.isNotEmpty() }
+                }
+            }
+        }
+        listOfNotNull(company, title).joinToString(" · ").ifEmpty { nickname }?.take(80)
+    }.getOrNull()
+}
 
 private fun readPickedContact(context: Context, uri: Uri): PickedContact? = runCatching {
     context.contentResolver.query(
@@ -372,10 +516,20 @@ fun PeoplePickerSheet(
     var query by remember { mutableStateOf("") }
     val trimmed = query.trim()
 
+    val everyone = remember(selected, known) { (selected + known).distinctBy { it.id } }
+    val pickerContext = LocalContext.current
+
     val pickContact = rememberContactPicker { picked ->
-        val existing = known.firstOrNull { it.contactLookupKey != null && it.contactLookupKey == picked.lookupKey }
+        // The same contact is the same person. Otherwise the one person with that name who has
+        // no contact yet gets it. Anything else is someone new: namesakes are different people.
+        val sameName = everyone.filter { it.hasName(picked.name) }
+        val person = everyone.firstOrNull { it.contactLookupKey != null && it.contactLookupKey == picked.lookupKey }
+            ?: sameName.singleOrNull()?.takeIf { it.contactLookupKey == null }?.copy(contactLookupKey = picked.lookupKey)
+            ?: JournalPerson(name = picked.name, contactLookupKey = picked.lookupKey)
         haptics.performHapticFeedback(HapticFeedbackType.Confirm)
-        onAdd(existing ?: JournalPerson(name = picked.name, contactLookupKey = picked.lookupKey))
+        // who they are comes from the contact, when June may read it and nothing was written yet
+        val context = person.note ?: picked.lookupKey?.let { contactContext(pickerContext, it) }
+        onAdd(person.copy(note = context))
     }
 
     fun matches(p: JournalPerson) = trimmed.isEmpty() ||
@@ -384,17 +538,33 @@ fun PeoplePickerSheet(
 
     val inEntry = remember(selected, trimmed) { selected.filter(::matches) }
     val recent = remember(known, selected, trimmed) {
-        known.filter { k -> selected.none { it.isSamePerson(k) } }.filter(::matches).take(30)
+        known.filter { k -> selected.none { it.isSamePerson(k) } }.filter(::matches)
+            .sortedBy { trimmed.isNotEmpty() && !it.name.trim().startsWith(trimmed, ignoreCase = true) }
+            .take(30)
     }
-    val exactExists = trimmed.isNotEmpty() &&
-            (known + selected).any { it.name.equals(trimmed, ignoreCase = true) }
+    val namesakes = remember(everyone, trimmed) { if (trimmed.isEmpty()) emptyList() else everyone.filter { it.hasName(trimmed) } }
 
+    fun addNew() {
+        if (trimmed.isEmpty()) return
+        val person = JournalPerson(name = trimmed)
+        haptics.performHapticFeedback(HapticFeedbackType.Confirm)
+        onAdd(person)
+        query = ""
+        // a second Bart needs something to tell them apart: go straight to their details
+        if (namesakes.isNotEmpty()) onPersonClick(person)
+    }
+
+    /** Done on the keyboard: the person with that name when there is one to add, else someone new. */
     fun addTyped() {
         if (trimmed.isEmpty()) return
-        val match = known.firstOrNull { it.name.equals(trimmed, ignoreCase = true) }
-        haptics.performHapticFeedback(HapticFeedbackType.Confirm)
-        onAdd(match ?: JournalPerson(name = trimmed))
-        query = ""
+        val existing = namesakes.firstOrNull { n -> selected.none { it.isSamePerson(n) } }
+        if (existing != null) {
+            haptics.performHapticFeedback(HapticFeedbackType.Confirm)
+            onAdd(existing)
+            query = ""
+        } else if (namesakes.isEmpty()) {
+            addNew()
+        }
     }
 
     ModalBottomSheet(
@@ -417,14 +587,7 @@ fun PeoplePickerSheet(
                         text = stringResource(R.string.people_sheet_title),
                         style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(top = 16.dp, bottom = 4.dp)
-                    )
-                    Text(
-                        text = stringResource(R.string.people_sheet_subtitle),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.padding(horizontal = 24.dp)
+                        modifier = Modifier.padding(top = 16.dp)
                     )
                     Spacer(Modifier.height(20.dp))
                     TextField(
@@ -473,7 +636,7 @@ fun PeoplePickerSheet(
             }
 
             // Quick actions: add what you typed, or pick from the address book.
-            val showAddTyped = trimmed.isNotEmpty() && !exactExists
+            val showAddTyped = trimmed.isNotEmpty() && namesakes.isEmpty()
             val actionCount = if (showAddTyped) 2 else 1
             if (showAddTyped) {
                 item(key = "add-typed") {
@@ -490,7 +653,7 @@ fun PeoplePickerSheet(
                                 tint = MaterialTheme.colorScheme.primary
                             )
                         },
-                        onClick = ::addTyped,
+                        onClick = ::addNew,
                         modifier = Modifier.animateItem()
                     )
                 }
@@ -498,7 +661,6 @@ fun PeoplePickerSheet(
             item(key = "contacts") {
                 JuneConnectedItem(
                     title = stringResource(R.string.people_from_contacts),
-                    subtitle = stringResource(R.string.people_contacts_desc),
                     leadingContent = {
                         Box(
                             Modifier
@@ -544,7 +706,7 @@ fun PeoplePickerSheet(
                     PersonListRow(
                         person = person,
                         title = person.name,
-                        subtitle = personSubtitle(person),
+                        subtitle = person.note,
                         index = index,
                         count = inEntry.size,
                         selected = true,
@@ -576,30 +738,17 @@ fun PeoplePickerSheet(
                 }
             }
 
-            item(key = "recent-label") {
-                SheetSectionLabel(stringResource(R.string.people_recent), modifier = Modifier.animateItem())
-            }
-
-            if (recent.isEmpty()) {
-                item(key = "recent-empty") {
-                    Text(
-                        text = if (trimmed.isNotEmpty()) stringResource(R.string.people_no_match, trimmed)
-                        else stringResource(R.string.people_empty_recent),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 4.dp)
-                            .animateItem()
-                    )
+            if (recent.isNotEmpty()) {
+                item(key = "recent-label") {
+                    SheetSectionLabel(stringResource(R.string.people_recent), modifier = Modifier.animateItem())
                 }
             }
 
-            itemsIndexed(recent, key = { _, p -> "recent-" + p.identityKey }) { index, person ->
+            itemsIndexed(recent, key = { _, p -> "recent-" + p.id }) { index, person ->
                 PersonListRow(
                     person = person,
                     title = person.name,
-                    subtitle = personSubtitle(person),
+                    subtitle = person.note,
                     index = index,
                     count = recent.size,
                     linked = person.contactLookupKey != null,
@@ -620,14 +769,33 @@ fun PeoplePickerSheet(
                         .animateItem()
                 )
             }
+
+            // Someone with this name exists already, and this is not them: another Bart.
+            if (namesakes.isNotEmpty()) {
+                item(key = "add-another") {
+                    PersonListRow(
+                        person = JournalPerson(id = "preview", name = trimmed),
+                        title = stringResource(R.string.people_add_another, trimmed),
+                        subtitle = stringResource(R.string.people_add_another_desc),
+                        index = 0,
+                        count = 1,
+                        trailing = {
+                            Icon(
+                                painterResource(R.drawable.add_circle_24px),
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        },
+                        onClick = ::addNew,
+                        modifier = Modifier
+                            .padding(top = 16.dp)
+                            .animateItem()
+                    )
+                }
+            }
         }
     }
 }
-
-@Composable
-private fun personSubtitle(person: JournalPerson): String? =
-    person.note?.takeIf { it.isNotBlank() }
-        ?: if (person.contactLookupKey != null) stringResource(R.string.people_from_contacts_label) else null
 
 @Composable
 private fun SheetSectionLabel(text: String, modifier: Modifier = Modifier, trailing: String? = null) {
@@ -724,6 +892,10 @@ fun PersonDetailSheet(
     onSave: (JournalPerson) -> Unit,
     onRemove: (JournalPerson) -> Unit,
     onDismiss: () -> Unit,
+    /** What the destructive button says: leaving this entry, or leaving every entry. */
+    removeLabel: String = stringResource(R.string.people_remove),
+    /** Everyone else, to notice when the name is shared and context is needed to tell them apart. */
+    everyone: List<JournalPerson> = emptyList(),
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -741,6 +913,20 @@ fun PersonDetailSheet(
     val pickContact = rememberContactPicker { picked ->
         lookupKey = picked.lookupKey
         if (name.isBlank()) name = picked.name
+    }
+    val hasNamesake = everyone.any { it.id != person.id && it.hasName(draft.name) }
+
+    val contactsGranted = ContactsAccess.isGranted(context)
+    val askForContacts = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
+        ContactsAccess.answered()
+    }
+    // Context comes from the contact when there is one to read and nothing was written yet.
+    LaunchedEffect(lookupKey, contactsGranted) {
+        val key = lookupKey ?: return@LaunchedEffect
+        if (note.isBlank()) {
+            val fromContact = withContext(Dispatchers.IO) { contactContext(context, key) }
+            if (fromContact != null && note.isBlank()) note = fromContact
+        }
     }
 
     fun close(save: Boolean) {
@@ -814,6 +1000,9 @@ fun PersonDetailSheet(
                 onValueChange = { note = it.take(80) },
                 label = { Text(stringResource(R.string.people_note)) },
                 placeholder = { Text(stringResource(R.string.people_note_placeholder)) },
+                supportingText = if (hasNamesake && note.isBlank()) {
+                    { Text(stringResource(R.string.people_namesake_hint, draft.name)) }
+                } else null,
                 singleLine = true,
                 shape = RoundedCornerShape(20.dp),
                 colors = fieldColors,
@@ -853,6 +1042,14 @@ fun PersonDetailSheet(
                 },
                 onUnlink = { lookupKey = null }
             )
+            if (linked != null && !contactsGranted) {
+                TextButton(
+                    onClick = { askForContacts.launch(Manifest.permission.READ_CONTACTS) },
+                    modifier = Modifier.align(Alignment.Start)
+                ) {
+                    Text(stringResource(R.string.people_use_contact_details))
+                }
+            }
 
             Spacer(Modifier.height(16.dp))
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -869,7 +1066,7 @@ fun PersonDetailSheet(
                         modifier = Modifier.size(18.dp)
                     )
                     Spacer(Modifier.width(8.dp))
-                    Text(stringResource(R.string.people_remove), color = MaterialTheme.colorScheme.error)
+                    Text(removeLabel, color = MaterialTheme.colorScheme.error)
                 }
                 Spacer(Modifier.weight(1f))
                 FilledTonalButton(onClick = { close(save = true) }) {
@@ -884,7 +1081,6 @@ fun PersonDetailSheet(
 private fun ContactLinkRow(linked: Boolean, onClick: () -> Unit, onUnlink: () -> Unit) {
     JuneConnectedItem(
         title = stringResource(if (linked) R.string.people_linked_contact else R.string.people_link_contact),
-        subtitle = stringResource(if (linked) R.string.people_linked_contact_desc else R.string.people_link_contact_desc),
         leadingContent = {
             Icon(
                 painterResource(if (linked) R.drawable.person_24px_fill else R.drawable.person_24px),

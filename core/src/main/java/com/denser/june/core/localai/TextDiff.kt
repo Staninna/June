@@ -7,7 +7,12 @@ package com.denser.june.core.localai
 object TextDiff {
     enum class Op { Equal, Added, Removed }
 
-    data class Segment(val op: Op, val text: String)
+    /**
+     * @param text what the segment shows: the new text, or the old text of a removed part.
+     * @param oldText the same stretch as it is in the old text. It only differs from [text] in
+     *   white space, which is not treated as a change.
+     */
+    data class Segment(val op: Op, val text: String, val oldText: String = if (op == Op.Added) "" else text)
 
     private val TOKEN = Regex("""\[@[^\]]*]\(person:[^)]*\)|\s+|[\p{L}\p{N}'’_-]+|[^\s\p{L}\p{N}]""")
 
@@ -37,16 +42,17 @@ object TextDiff {
             }
         }
         val out = mutableListOf<Segment>()
-        fun push(op: Op, t: String) {
+        fun push(op: Op, t: String, old: String = if (op == Op.Added) "" else t) {
             val last = out.lastOrNull()
-            if (last != null && last.op == op) out[out.size - 1] = Segment(op, last.text + t) else out += Segment(op, t)
+            if (last != null && last.op == op) out[out.size - 1] = Segment(op, last.text + t, last.oldText + old)
+            else out += Segment(op, t, old)
         }
         var i = 0
         var j = 0
         while (i < n && j < m) {
             when {
                 same(a[i], b[j]) -> {
-                    push(Op.Equal, b[j]); i++; j++
+                    push(Op.Equal, b[j], a[i]); i++; j++
                 }
                 lcs[i + 1][j] >= lcs[i][j + 1] -> push(Op.Removed, a[i++])
                 else -> push(Op.Added, b[j++])
