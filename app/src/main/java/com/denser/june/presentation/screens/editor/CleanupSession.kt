@@ -29,6 +29,8 @@ class CleanupSession(private val cleanup: DictationCleanup) {
         /** True when [entryKey] is a journal id, so the entry can be opened from anywhere. */
         val canOpenEntry: Boolean = false,
         val state: CleanupUiState = CleanupUiState.Hidden,
+        /** The entry's text as it was sent. What is written after that is not in the rewrite. */
+        val source: String? = null,
         /** The sheet is put away; the run shows as a button or pill. */
         val minimized: Boolean = false,
         /** The key of the entry whose editor is on screen right now, if any. */
@@ -51,7 +53,9 @@ class CleanupSession(private val cleanup: DictationCleanup) {
     fun start(entryKey: String, canOpenEntry: Boolean, body: String, people: suspend () -> List<CleanupPerson>) {
         job?.cancel()
         val working = CleanupUiState.Working()
-        _snapshot.update { it.copy(entryKey = entryKey, canOpenEntry = canOpenEntry, state = working, minimized = false) }
+        _snapshot.update {
+            it.copy(entryKey = entryKey, canOpenEntry = canOpenEntry, state = working, source = body, minimized = false)
+        }
         job =
             scope.launch {
                 val outcome =
@@ -86,7 +90,9 @@ class CleanupSession(private val cleanup: DictationCleanup) {
     fun cancel() {
         job?.cancel()
         job = null
-        _snapshot.update { it.copy(entryKey = null, canOpenEntry = false, state = CleanupUiState.Hidden, minimized = false) }
+        _snapshot.update {
+            it.copy(entryKey = null, canOpenEntry = false, state = CleanupUiState.Hidden, source = null, minimized = false)
+        }
     }
 
     /** The result was used or dismissed. */

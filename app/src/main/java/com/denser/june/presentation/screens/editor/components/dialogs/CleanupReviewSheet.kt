@@ -64,6 +64,11 @@ import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import com.denser.june.core.localai.DictationCleanup
+import com.denser.june.core.localai.EditedMeanwhile
+import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.ui.text.style.TextOverflow
+import com.denser.june.presentation.components.JuneDialog
 import kotlinx.coroutines.delay
 import com.denser.june.core.R
 import com.denser.june.core.localai.TextDiff
@@ -95,7 +100,8 @@ fun CleanupReviewSheet(
     onRetry: () -> Unit,
     onCancel: () -> Unit,
     onMinimize: () -> Unit,
-    isStale: Boolean,
+    /** What was written in the entry since the cleanup started. */
+    edits: EditedMeanwhile,
     onOpenServer: (() -> Unit)?,
     onOpenSettings: () -> Unit,
     /** Show the texts as in the entry (true) or as Markdown (false). */
@@ -133,7 +139,7 @@ fun CleanupReviewSheet(
                     is CleanupUiState.Working -> WorkingContent(s, onCancel, onMinimize)
                     is CleanupUiState.Problem -> ProblemContent(s, onRetry, onCancel, onOpenServer, onOpenSettings)
                     is CleanupUiState.Review ->
-                        ReviewContent(s, maxHeight, isStale, onAccept, onRetry, onCancel, formatted, onFormattedChange, fontFamily)
+                        ReviewContent(s, maxHeight, edits, onAccept, onRetry, onCancel, formatted, onFormattedChange, fontFamily)
                     CleanupUiState.Hidden -> Spacer(Modifier.height(1.dp))
                 }
             }
@@ -351,7 +357,7 @@ private fun ProblemContent(
 private fun ReviewContent(
     state: CleanupUiState.Review,
     maxHeight: androidx.compose.ui.unit.Dp,
-    isStale: Boolean,
+    edits: EditedMeanwhile,
     onAccept: () -> Unit,
     onRetry: () -> Unit,
     onCancel: () -> Unit,
@@ -360,6 +366,29 @@ private fun ReviewContent(
     fontFamily: FontFamily?,
 ) {
     var tab by rememberSaveable { mutableStateOf(ReviewView.Changes) }
+    var confirmReplace by remember { mutableStateOf(false) }
+
+    // The earlier text was changed after it was sent: accepting would undo those changes. Ask.
+    if (confirmReplace) {
+        JuneDialog(
+            onDismissRequest = { confirmReplace = false },
+            title = stringResource(R.string.cleanup_replace_title),
+            icon = R.drawable.edit_24px,
+            text = { Text(stringResource(R.string.cleanup_replace_desc)) },
+            confirmButton = {
+                Button(onClick = {
+                    confirmReplace = false
+                    onRetry()
+                }) { Text(stringResource(R.string.cleanup_again)) }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = {
+                    confirmReplace = false
+                    onAccept()
+                }) { Text(stringResource(R.string.cleanup_replace)) }
+            },
+        )
+    }
     val scheme = MaterialTheme.colorScheme
     val added = SpanStyle(background = scheme.primaryContainer, color = scheme.onPrimaryContainer)
     val removed =
@@ -406,15 +435,16 @@ private fun ReviewContent(
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.semantics { heading() },
             )
-            if (isStale) {
+            if (edits == EditedMeanwhile.Changed) {
                 Spacer(Modifier.height(12.dp))
                 Surface(
                     shape = RoundedCornerShape(16.dp),
-                    color = scheme.tertiaryContainer,
-                    contentColor = scheme.onTertiaryContainer,
+                    color = scheme.errorContainer,
+                    contentColor = scheme.onErrorContainer,
+                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
                 ) {
                     Text(
-                        stringResource(R.string.cleanup_stale),
+                        stringResource(R.string.cleanup_changed),
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
                     )
@@ -480,6 +510,27 @@ private fun ReviewContent(
                 )
             }
         }
+        if (edits is EditedMeanwhile.Added) {
+            // Written while the cleanup ran: not in the rewrite, and not lost. It goes after it.
+            Spacer(Modifier.height(8.dp))
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = scheme.tertiaryContainer.copy(alpha = 0.6f),
+                contentColor = scheme.onTertiaryContainer,
+                modifier = Modifier.fillMaxWidth().semantics(mergeDescendants = true) {},
+            ) {
+                Column(Modifier.padding(horizontal = 20.dp, vertical = 12.dp)) {
+                    Text(stringResource(R.string.cleanup_kept), style = MaterialTheme.typography.labelLarge)
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        edits.text,
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
         if (state.changes.isNotEmpty()) {
             Spacer(Modifier.height(8.dp))
             Text(
@@ -506,7 +557,7 @@ private fun ReviewContent(
                 contentColor = scheme.onSecondaryContainer,
             )
             JuneFloatingAction(
-                onClick = onAccept,
+                onClick = { if (edits == EditedMeanwhile.Changed) confirmReplace = true else onAccept() },
                 label = stringResource(R.string.cleanup_accept),
                 icon = { Icon(painterResource(R.drawable.check_24px), contentDescription = null) },
             )

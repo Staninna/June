@@ -775,7 +775,14 @@
     <string name="cleanup_minimize">Keep writing</string>
     <string name="cleanup_ready">Cleanup ready</string>
     <string name="cleanup_review_action">Review</string>
-    <string name="cleanup_stale">You changed this entry after the cleanup started. Accepting replaces it with the rewrite below; Retry cleans up the new text.</string>
+    <string name="cleanup_changed">You changed this entry after the cleanup started. The rewrite does not have those changes.</string>
+    <string name="cleanup_kept">Written since, kept after the rewrite</string>
+    <string name="cleanup_replace_title">Replace your changes?</string>
+    <string name="cleanup_replace_desc">The rewrite is based on the entry as it was when the cleanup started. Accepting it replaces what you changed since.</string>
+    <string name="cleanup_replace">Replace</string>
+    <string name="cleanup_again">Clean up again</string>
+    <string name="cleanup_notice_added">Cleaning up the text before this. What you add now is kept.</string>
+    <string name="cleanup_notice_changed">This text is being cleaned up. Changes to it will not be in the rewrite.</string>
     <string name="cleanup_busy_elsewhere">A cleanup of another entry is still running</string>
     <string name="cleanup_button_working">Cleanup running. Show progress</string>
     <string name="cleanup_button_working_percent">Cleanup running, %1$d%%. Show progress</string>

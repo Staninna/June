@@ -176,6 +176,12 @@ fun EditorScreen(
     }
 
     LaunchedEffect(Unit) {
+        viewModel.cleanupNotice.collect { message ->
+            cleanupSnackbar.showSnackbar(message = context.getString(message), withDismissAction = true)
+        }
+    }
+
+    LaunchedEffect(Unit) {
         viewModel.cleanupApplied.collect {
             val result = cleanupSnackbar.showSnackbar(
                 message = context.getString(R.string.cleanup_applied),
@@ -627,7 +633,7 @@ fun EditorScreen(
             onRetry = viewModel::retryCleanup,
             onCancel = viewModel::cancelCleanup,
             onMinimize = viewModel::minimizeCleanup,
-            isStale = remember(cleanupState) { viewModel.isCleanupStale() },
+            edits = remember(cleanupState, state.content) { viewModel.editedDuringCleanup() },
             onOpenServer = LocalAiVM.serverLaunchIntent(context)?.let { intent -> { context.startActivity(intent) } },
             onOpenSettings = {
                 viewModel.cancelCleanup()

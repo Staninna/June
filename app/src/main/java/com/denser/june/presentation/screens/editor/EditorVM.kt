@@ -28,6 +28,7 @@ import com.denser.june.core.domain.model.unifyPeople
 import com.denser.june.core.domain.model.renameMentions
 import com.denser.june.core.domain.model.resolvePeople
 import com.denser.june.core.localai.CleanupPerson
+import com.denser.june.core.localai.EditedMeanwhile
 import com.denser.june.core.domain.model.withPerson
 import com.denser.june.core.domain.model.JournalAudio
 import com.denser.june.core.domain.model.JournalTheme
@@ -205,9 +206,16 @@ class EditorVM(
     /** Puts the sheet away. The run carries on and shows on the sparkle button. */
     fun minimizeCleanup() = cleanupSession.minimize()
 
-    /** True when the entry was edited after the run on screen started. */
-    fun isCleanupStale(): Boolean =
-        (cleanupSession.snapshot.value.state as? CleanupUiState.Review)?.let { it.original != currentMarkdown() } ?: false
+    /** What was written in this entry since its cleanup started. */
+    fun editedDuringCleanup(): EditedMeanwhile {
+        val snap = cleanupSession.snapshot.value
+        val source = snap.source?.takeIf { snap.entryKey == cleanupKey } ?: return EditedMeanwhile.No
+        return EditedMeanwhile.of(source, currentMarkdown())
+    }
+
+    /** Emits a line to show when the user starts writing in an entry that is being cleaned up. */
+    private val _cleanupNotice = Channel<Int>(Channel.CONFLATED)
+    val cleanupNotice = _cleanupNotice.receiveAsFlow()
 
     /** Replaces the body with the reviewed rewrite. The only place where Local AI changes an entry. */
     fun acceptCleanup() {
@@ -215,8 +223,10 @@ class EditorVM(
         val review = snap.state as? CleanupUiState.Review ?: return
         if (snap.entryKey != cleanupKey) return
         // Undo goes back to what is in the editor now, which may be newer than what was cleaned up
+        // text added while the cleanup ran is not in the rewrite: it stays, after it
+        val edits = editedDuringCleanup()
         contentBeforeCleanup = currentMarkdown()
-        replaceBody(review.rewrite)
+        replaceBody(if (edits is EditedMeanwhile.Added) edits.keep(review.rewrite) else review.rewrite)
         // people the rewrite names are on the entry now
         val known = _state.value.knownPeople
         val named = MENTIONED_PERSON.findAll(review.rewrite).mapNotNull { m -> known.firstOrNull { it.id == m.groupValues[1] } }.toList()
@@ -249,6 +259,27 @@ class EditorVM(
             _state.map { it.journalId }.distinctUntilChanged().collect { id ->
                 if (id != null) cleanupSession.rebind(draftKey, id)
                 cleanupSession.editorShown(cleanupKey)
+            }
+        }
+        viewModelScope.launch {
+            // Writing on while a cleanup runs is fine, but the rewrite will not have that text.
+            // Say once per run what happens to it, the moment it matters.
+            var toldFor: Pair<String?, EditedMeanwhile>? = null
+            _state.map { it.content }.distinctUntilChanged().collect {
+                val snap = cleanupSession.snapshot.value
+                if (snap.entryKey != cleanupKey || snap.state !is CleanupUiState.Working) return@collect
+                val kind = when (editedDuringCleanup()) {
+                    is EditedMeanwhile.Added -> EditedMeanwhile.Added("", false)
+                    EditedMeanwhile.Changed -> EditedMeanwhile.Changed
+                    EditedMeanwhile.No -> return@collect
+                }
+                if (toldFor == snap.source to kind) return@collect
+                // once it is known the earlier text changed, "your new text is kept" is no longer true
+                if (kind is EditedMeanwhile.Added && toldFor == snap.source to EditedMeanwhile.Changed) return@collect
+                toldFor = snap.source to kind
+                _cleanupNotice.trySend(
+                    if (kind is EditedMeanwhile.Added) R.string.cleanup_notice_added else R.string.cleanup_notice_changed
+                )
             }
         }
         viewModelScope.launch {
