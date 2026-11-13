@@ -11,7 +11,9 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
@@ -198,6 +200,9 @@ fun ReminderScreen() {
                     modifier = Modifier.padding(start = 8.dp, end = 8.dp, top = 4.dp, bottom = 20.dp)
                 )
             }
+
+            // Don't flash an "off / no moments" state while preferences are still loading.
+            if (!state.isLoaded) return@LazyColumn
 
             item(key = "hero") {
                 ReminderHeroCard(
@@ -587,24 +592,24 @@ private fun ReminderMomentCard(
                                 modifier = Modifier.padding(start = 6.dp, bottom = 8.dp)
                             )
                         }
-                    }
-                    AnimatedVisibility(
-                        visible = isNext && active,
-                        enter = fadeIn() + expandVertically(),
-                        exit = fadeOut() + shrinkVertically()
-                    ) {
-                        Surface(
-                            shape = CircleShape,
-                            color = MaterialTheme.colorScheme.tertiaryContainer,
-                            contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
-                            modifier = Modifier.padding(start = 4.dp, bottom = 4.dp)
+                        AnimatedVisibility(
+                            visible = isNext && active,
+                            enter = fadeIn() + expandHorizontally(),
+                            exit = fadeOut() + shrinkHorizontally()
                         ) {
-                            Text(
-                                text = stringResource(R.string.reminder_up_next),
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-                            )
+                            Surface(
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.tertiaryContainer,
+                                contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                                modifier = Modifier.padding(start = 10.dp, bottom = 12.dp)
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.reminder_up_next),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                )
+                            }
                         }
                     }
                     Row(
