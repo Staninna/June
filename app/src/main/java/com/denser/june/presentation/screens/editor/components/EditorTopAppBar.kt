@@ -36,6 +36,8 @@ fun EditorTopAppBar(
     isThemeDirty: Boolean = false,
     onResetTheme: () -> Unit = {},
     isPlusStylingActive: Boolean = false,
+    showCleanupAction: Boolean = false,
+    onCleanupClick: () -> Unit = {},
 ) {
     val isPlus = LocalIsPlus.current
 
@@ -149,6 +151,21 @@ fun EditorTopAppBar(
                     )
                 }
             } else {
+                if (showCleanupAction) {
+                    FilledIconButton(
+                        onClick = onCleanupClick,
+                        enabled = !isLoading,
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                            contentColor = MaterialTheme.colorScheme.primary
+                        )
+                    ) {
+                        Icon(
+                            painterResource(R.drawable.auto_awesome_24px),
+                            stringResource(R.string.clean_up_dictation)
+                        )
+                    }
+                }
                 if (showSaveButton) {
                     Button(
                         enabled = !isLoading,

@@ -305,6 +305,14 @@ object SettingsTileRegistry {
                 content = { InternetAccessTile() }
             ),
             SettingTile(
+                key = "LOCAL_AI",
+                title = stringResource(R.string.local_ai),
+                subtitle = { context, _ -> context.getString(R.string.local_ai_desc) },
+                category = "Local AI",
+                keywords = listOf("ai", "llm", "model", "dictation", "clean", "rewrite", "local", "server", "smolchat", "qwen"),
+                content = { LocalAiTile() }
+            ),
+            SettingTile(
                 key = "LOCATION_PERMISSION",
                 title = stringResource(R.string.location),
                 subtitle = { context, _ -> context.getString(R.string.location_permission_needed) },

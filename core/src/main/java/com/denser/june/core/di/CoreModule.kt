@@ -41,6 +41,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import org.koin.core.module.dsl.singleOf
+import com.denser.june.core.localai.DictationCleanup
+import com.denser.june.core.localai.LocalAiClient
+import com.denser.june.core.localai.LocalAiPreferences
 import org.koin.core.qualifier.named
 import android.content.Context
 import com.denser.june.core.data.remote.InternetInterceptor
@@ -67,6 +70,12 @@ val coreModule = module {
     single { FontPreferencesImpl(get(named("PreferencesDataStore"))) }.bind<FontPreferences>()
     single { JournalPreferencesImpl(get(named("PreferencesDataStore"))) }.bind<JournalPreferences>()
     single { EmojiPreferencesImpl(get()) }.bind<EmojiPreferences>()
+
+    // Local AI (docs/LOCAL_LLM_API.md): talks to 127.0.0.1 only, with its own OkHttp client so the
+    // "Internet access" switch (which blocks real network traffic) does not apply to on-device calls.
+    single { LocalAiPreferences(get()) }
+    single { LocalAiClient() }
+    singleOf(::DictationCleanup)
 
     single {
         OkHttpClient.Builder()

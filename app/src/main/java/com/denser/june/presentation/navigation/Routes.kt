@@ -79,6 +79,9 @@ sealed interface Route : NavKey {
     @Serializable
     data object AboutSettings : Route
 
+    @Serializable
+    data object LocalAiSettings : Route
+
 
 
     @Serializable
