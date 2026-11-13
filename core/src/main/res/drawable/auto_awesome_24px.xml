@@ -1,0 +1,11 @@
+<!-- Sparkle icon for Local AI actions (drawn for June, same 960 viewport as the Material Symbols set). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="960"
+    android:viewportHeight="960"
+    android:tint="?attr/colorControlNormal">
+    <path
+        android:fillColor="@android:color/white"
+        android:pathData="M400,240Q426,442 498,514Q570,586 760,600Q570,614 498,686Q426,758 400,880Q374,758 302,686Q230,614 40,600Q230,586 302,514Q374,442 400,240ZM740,80Q752,170 786,204Q820,238 900,246Q820,254 786,288Q752,322 740,412Q728,322 694,288Q660,254 580,246Q660,238 694,204Q728,170 740,80Z" />
+</vector>

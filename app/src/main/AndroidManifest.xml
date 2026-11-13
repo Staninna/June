@@ -4,6 +4,11 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.INTERNET" />
     <queries>
+        <!-- Local AI server (docs/LOCAL_LLM_API.md §3): pairing and "Open server app" -->
+        <package android:name="io.shubham0204.smollmandroid" />
+        <intent>
+            <action android:name="io.shubham0204.smollmandroid.action.PAIR" />
+        </intent>
         <package android:name="com.google.android.gms" />
         <intent>
             <action android:name="com.google.android.gms.fonts.BIND_QUERY" />

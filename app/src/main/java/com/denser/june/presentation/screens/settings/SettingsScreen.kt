@@ -316,6 +316,22 @@ fun SettingsScreen() {
                                     }
                                 )
                                 SettingsItem(
+                                    title = stringResource(R.string.local_ai),
+                                    leadingContent = {
+                                        Icon(
+                                            painter = painterResource(R.drawable.auto_awesome_24px),
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.secondary,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
+                                        )
+                                    },
+                                    onClick = {
+                                        focusManager.clearFocus()
+                                        keyboardController?.hide()
+                                        navigator.navigateTo(Route.LocalAiSettings)
+                                    }
+                                )
+                                SettingsItem(
                                     title = stringResource(R.string.vault),
                                     leadingContent = {
                                         if (!isPlus) {

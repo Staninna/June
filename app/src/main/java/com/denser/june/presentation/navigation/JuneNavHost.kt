@@ -29,6 +29,7 @@ import com.denser.june.presentation.screens.editor.screens.RecordAudioScreen
 import com.denser.june.presentation.screens.home.HomeScreen
 import com.denser.june.presentation.screens.settings.SettingsScreen
 import com.denser.june.presentation.screens.settings.screens.AboutSettingsScreen
+import com.denser.june.presentation.screens.settings.localai.LocalAiSettingsScreen
 import com.denser.june.presentation.screens.settings.screens.AppearanceSettingsScreen
 import com.denser.june.presentation.screens.settings.screens.AppLockSettingsScreen
 import com.denser.june.presentation.screens.settings.screens.ConsoleLogsScreen
@@ -265,6 +266,10 @@ fun JuneNavHost(
 
             entry<Route.SyncBackupSettings> {
                 DataSyncSettingsScreen()
+            }
+
+            entry<Route.LocalAiSettings> {
+                LocalAiSettingsScreen()
             }
 
             entry<Route.AboutSettings> {

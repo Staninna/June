@@ -1,5 +1,13 @@
 package com.denser.june.presentation.screens.editor
 
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
+import com.denser.june.presentation.screens.editor.components.dialogs.CleanupReviewSheet
+import com.denser.june.presentation.screens.settings.localai.LocalAiVM
+import org.koin.compose.koinInject
+
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
@@ -49,7 +57,6 @@ import com.denser.june.presentation.theme.FontPresets
 import com.denser.june.presentation.components.color.ColorTab
 import com.denser.june.presentation.theme.getJournalFontFamily
 import com.denser.june.presentation.utils.UiUtils
-import org.koin.compose.koinInject
 import org.koin.compose.viewmodel.koinViewModel
 import java.time.LocalTime
 
@@ -65,6 +72,9 @@ fun EditorScreen(
 
     val navigator = koinInject<AppNavigator>()
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val isLocalAiEnabled by viewModel.isLocalAiEnabled.collectAsStateWithLifecycle()
+    val cleanupState by viewModel.cleanup.collectAsStateWithLifecycle()
+    val cleanupSnackbar = remember { SnackbarHostState() }
     val isMarkdownEnabled = state.isMarkdownEnabled
     val isKeyboardAutocorrectEnabled = state.isKeyboardAutocorrectEnabled
     val isKeyboardCapitalizationEnabled = state.isKeyboardCapitalizationEnabled
@@ -144,6 +154,18 @@ fun EditorScreen(
         }
     }
 
+    LaunchedEffect(Unit) {
+        viewModel.cleanupApplied.collect {
+            val result = cleanupSnackbar.showSnackbar(
+                message = context.getString(R.string.cleanup_applied),
+                actionLabel = context.getString(R.string.cleanup_undo),
+                withDismissAction = true,
+                duration = SnackbarDuration.Long
+            )
+            if (result == SnackbarResult.ActionPerformed) viewModel.undoCleanup()
+        }
+    }
+
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         viewModel.onAction(EditorAction.Refresh)
     }
@@ -216,6 +238,7 @@ fun EditorScreen(
         fontVariation = state.fontVariation
     ) {
         Scaffold(
+            snackbarHost = { SnackbarHost(cleanupSnackbar) },
             topBar = {
                 EditorTopAppBar(
                     isFontMode = isFontMode,
@@ -224,6 +247,12 @@ fun EditorScreen(
                     showSaveButton = showSaveButton,
                     isLoading = state.isLoading,
                     isPlusStylingActive = isPlusStylingActive,
+                    showCleanupAction = isLocalAiEnabled && state.content.isNotBlank() && !state.isLoading,
+                    onCleanupClick = {
+                        keyboardController?.hide()
+                        focusManager.clearFocus(force = true)
+                        viewModel.startCleanup()
+                    },
                     onCloseClick = {
                         if (isFontMode) isFontMode = false
                         else if (isColorMode) isColorMode = false
@@ -547,6 +576,18 @@ fun EditorScreen(
             }
         }
         }
+
+        CleanupReviewSheet(
+            state = cleanupState,
+            onAccept = viewModel::acceptCleanup,
+            onRetry = viewModel::retryCleanup,
+            onCancel = viewModel::cancelCleanup,
+            onOpenServer = LocalAiVM.serverLaunchIntent(context)?.let { intent -> { context.startActivity(intent) } },
+            onOpenSettings = {
+                viewModel.cancelCleanup()
+                navigator.navigateTo(Route.LocalAiSettings)
+            },
+        )
 
         EditorModals(
             dialogState = dialogState,

@@ -1,5 +1,6 @@
 package com.denser.june.di
 
+import com.denser.june.presentation.screens.settings.localai.LocalAiVM
 import android.content.Context
 import coil.ImageLoader
 import coil.decode.VideoFrameDecoder
@@ -72,7 +73,9 @@ val juneModules = module {
             journalPrefs = get(),
             songRepo = get(),
             navigator = get(),
-            billingHandler = get()
+            billingHandler = get(),
+            dictationCleanup = get(),
+            localAiPrefs = get()
         )
     }
     viewModelOf(::JournalsVM)
@@ -82,6 +85,7 @@ val juneModules = module {
     viewModelOf(::VaultVM)
     viewModelOf(::SyncVM)
     viewModelOf(::ReminderVM)
+    viewModelOf(::LocalAiVM)
 
     singleOf(::JuneNavigator)
     single<AppNavigator> { get<JuneNavigator>() }

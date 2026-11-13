@@ -1,5 +1,18 @@
 package com.denser.june.presentation.screens.editor
 
+import com.denser.june.core.R
+import com.denser.june.core.localai.DictationCleanup
+import com.denser.june.core.localai.DictationPrompt
+import com.denser.june.core.localai.LocalAiPreferences
+import com.denser.june.core.localai.TextDiff
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.withContext
+
 import android.net.Uri
 import android.util.Patterns
 import androidx.lifecycle.SavedStateHandle
@@ -43,7 +56,9 @@ class EditorVM(
     private val journalPrefs: JournalPreferences,
     private val songRepo: SongRepository,
     private val navigator: AppNavigator,
-    private val billingHandler: BillingHandler
+    private val billingHandler: BillingHandler,
+    private val dictationCleanup: DictationCleanup,
+    private val localAiPrefs: LocalAiPreferences
 ) : ViewModel() {
     private val editorRoute = initialRoute
     private val journalId = editorRoute?.journalId
@@ -86,6 +101,84 @@ class EditorVM(
 
     private val _uiEvent = Channel<String>()
     val uiEvent = _uiEvent.receiveAsFlow()
+
+    // --- Local AI: "Clean up dictation" ---------------------------------------------------------
+    val isLocalAiEnabled: StateFlow<Boolean> =
+        localAiPrefs.settings.map { it.enabled }.stateIn(viewModelScope, SharingStarted.Eagerly, localAiPrefs.current.enabled)
+
+    private val _cleanup = MutableStateFlow<CleanupUiState>(CleanupUiState.Hidden)
+    val cleanup: StateFlow<CleanupUiState> = _cleanup.asStateFlow()
+
+    /** Emits once after a rewrite was applied, so the screen can offer Undo. */
+    private val _cleanupApplied = Channel<Unit>(Channel.CONFLATED)
+    val cleanupApplied = _cleanupApplied.receiveAsFlow()
+
+    private var cleanupJob: Job? = null
+    private var contentBeforeCleanup: String? = null
+
+    private fun currentMarkdown(): String {
+        val s = _state.value
+        return if (s.isMarkdownEnabled && hyphenState.text.isNotEmpty()) hyphenState.toMarkdown() else s.content
+    }
+
+    fun startCleanup() {
+        val body = currentMarkdown()
+        if (body.isBlank()) {
+            viewModelScope.launch { _uiEvent.send(context.getString(R.string.cleanup_empty_body)) }
+            return
+        }
+        cleanupJob?.cancel()
+        _cleanup.value = CleanupUiState.Working
+        cleanupJob =
+            viewModelScope.launch {
+                val people = DictationPrompt.peopleFromTags(journalRepo.getUniqueTags().first())
+                _cleanup.value =
+                    when (val outcome = dictationCleanup.run(body, people)) {
+                        is DictationCleanup.Outcome.Rewrite ->
+                            CleanupUiState.Review(
+                                original = outcome.original,
+                                rewrite = outcome.rewrite,
+                                segments = withContext(Dispatchers.Default) { TextDiff.diff(outcome.original, outcome.rewrite) },
+                                changes = outcome.changes,
+                            )
+                        DictationCleanup.Outcome.ServerUnavailable -> CleanupUiState.Problem(CleanupUiState.Kind.ServerUnavailable)
+                        DictationCleanup.Outcome.NotPaired -> CleanupUiState.Problem(CleanupUiState.Kind.NotPaired)
+                        DictationCleanup.Outcome.NoModel -> CleanupUiState.Problem(CleanupUiState.Kind.NoModel)
+                        DictationCleanup.Outcome.Busy -> CleanupUiState.Problem(CleanupUiState.Kind.Busy)
+                        DictationCleanup.Outcome.TooLong -> CleanupUiState.Problem(CleanupUiState.Kind.TooLong)
+                        DictationCleanup.Outcome.EmptyResult -> CleanupUiState.Problem(CleanupUiState.Kind.Empty)
+                        is DictationCleanup.Outcome.Error -> CleanupUiState.Problem(CleanupUiState.Kind.Error, outcome.message)
+                    }
+            }
+    }
+
+    fun retryCleanup() = startCleanup()
+
+    fun cancelCleanup() {
+        cleanupJob?.cancel()
+        cleanupJob = null
+        _cleanup.value = CleanupUiState.Hidden
+    }
+
+    /** Replaces the body with the reviewed rewrite. The only place where Local AI changes an entry. */
+    fun acceptCleanup() {
+        val review = _cleanup.value as? CleanupUiState.Review ?: return
+        contentBeforeCleanup = review.original
+        replaceBody(review.rewrite)
+        _cleanup.value = CleanupUiState.Hidden
+        _cleanupApplied.trySend(Unit)
+    }
+
+    fun undoCleanup() {
+        val previous = contentBeforeCleanup ?: return
+        contentBeforeCleanup = null
+        replaceBody(previous)
+    }
+
+    private fun replaceBody(markdown: String) {
+        hyphenState.setMarkdown(markdown)
+        updateState { it.copy(content = markdown) }
+    }
 
     private val _saveTrigger = MutableSharedFlow<EditorState>(
         replay = 0,
