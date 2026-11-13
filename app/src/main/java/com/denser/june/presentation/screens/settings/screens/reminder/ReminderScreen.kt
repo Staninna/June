@@ -59,6 +59,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -68,6 +69,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -264,7 +267,7 @@ fun ReminderScreen() {
                             val result = snackbarHostState.showSnackbar(
                                 message = removedMessage,
                                 actionLabel = undoLabel,
-                                duration = SnackbarDuration.Short
+                                duration = SnackbarDuration.Long
                             )
                             if (result == SnackbarResult.ActionPerformed) viewModel.restoreSlot(slot)
                         }
@@ -781,6 +784,7 @@ private fun RenameMomentDialog(
     onConfirm: (String) -> Unit,
 ) {
     var text by remember { mutableStateOf(initial) }
+    val focusRequester = remember { FocusRequester() }
     JuneDialog(
         onDismissRequest = onDismiss,
         title = stringResource(R.string.reminder_name_moment),
@@ -792,7 +796,9 @@ private fun RenameMomentDialog(
                     onValueChange = { if (it.length <= 40) text = it },
                     label = "",
                     placeholder = stringResource(R.string.reminder_name_placeholder),
+                    modifier = Modifier.focusRequester(focusRequester)
                 )
+                LaunchedEffect(Unit) { focusRequester.requestFocus() }
                 Spacer(Modifier.height(8.dp))
                 Text(
                     stringResource(R.string.reminder_name_hint),
