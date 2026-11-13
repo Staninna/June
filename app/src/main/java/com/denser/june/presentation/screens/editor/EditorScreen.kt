@@ -74,6 +74,7 @@ fun EditorScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val isLocalAiEnabled by viewModel.isLocalAiEnabled.collectAsStateWithLifecycle()
     val cleanupState by viewModel.cleanup.collectAsStateWithLifecycle()
+    val cleanupReviewFormatted by viewModel.isCleanupReviewFormatted.collectAsStateWithLifecycle()
     val cleanupIndicator by viewModel.cleanupIndicator.collectAsStateWithLifecycle()
     val haptics = androidx.compose.ui.platform.LocalHapticFeedback.current
     val cleanupSnackbar = remember { SnackbarHostState() }
@@ -89,7 +90,8 @@ fun EditorScreen(
 
     val activeTrigger = hyphenState.activeTrigger
     val activeTagQuery = activeTrigger
-        ?.takeIf { it.config.trigger == "@" || it.config.trigger == "#" }
+        // people are suggested from the journal's people, not from tags
+        ?.takeIf { it.config.trigger == "#" }
         ?.let { it.config.trigger + it.query }
     LaunchedEffect(activeTagQuery) {
         viewModel.onAction(EditorAction.SearchTags(activeTagQuery ?: ""))
@@ -97,7 +99,7 @@ fun EditorScreen(
 
     val onTagSelect: (String) -> Unit = { tag ->
         val trimmed = tag.trim()
-        if (trimmed.isNotBlank() && state.labels.none { it.equals(trimmed, ignoreCase = true) }) {
+        if (trimmed.isNotBlank() && state.tags.none { it.equals(trimmed, ignoreCase = true) }) {
             viewModel.onAction(EditorAction.UpdateTags(state.tags + trimmed))
         }
     }
@@ -461,7 +463,7 @@ fun EditorScreen(
                                     formattedDate = formattedDate,
                                     compactFormattedDate = compactFormattedDate,
                                     formattedTime = formattedTime,
-                                    tagCount = state.labels.size,
+                                    tagCount = state.labelCount,
                                     onEmojiClick = {
                                         if (!isCustomizing) {
                                             keyboardController?.hide()
@@ -560,8 +562,12 @@ fun EditorScreen(
                             state = hyphenState,
                             activeTrigger = activeTrigger,
                             tagSuggestions = state.tagSuggestions,
-                            currentTags = state.labels,
+                            currentTags = state.tags,
                             onTagSelect = onTagSelect,
+                            people = remember(state.people, state.knownPeople) {
+                                (state.people + state.knownPeople).distinctBy { it.id }
+                            },
+                            onPersonSelect = { viewModel.onAction(EditorAction.AddPerson(it)) },
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .onSizeChanged { size ->
@@ -627,6 +633,9 @@ fun EditorScreen(
                 viewModel.cancelCleanup()
                 navigator.navigateTo(Route.LocalAiSettings)
             },
+            formatted = cleanupReviewFormatted,
+            onFormattedChange = viewModel::setCleanupReviewFormatted,
+            fontFamily = getJournalFontFamily(fontName = state.font, variation = state.fontVariation),
         )
 
         EditorModals(

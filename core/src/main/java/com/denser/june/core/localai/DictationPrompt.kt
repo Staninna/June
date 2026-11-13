@@ -67,7 +67,7 @@ object DictationPrompt {
             topics = TOPIC_WORD.containsMatchIn(body),
         )
 
-    private fun rules(f: Features): List<String> =
+    private fun rules(f: Features, numberedNames: Boolean = false): List<String> =
         listOfNotNull(
             "Reply with the journal entry only. Start directly with its first sentence. No title, no intro, no comments after it.",
             "Keep every fact, event, person, time and number, in the same order. Add nothing: no new details, feelings or conclusions. " +
@@ -91,9 +91,16 @@ object DictationPrompt {
             "Keep links like [text](address) and pictures like ![name](file) exactly as written.".takeIf { f.links },
             "Words that start with # (like #awake) are my topic tags. Keep each one exactly as written, in the same place.".takeIf { f.topics },
             // last on purpose: the list of people is the only part that differs between entries
-            "Names with @ in front (like @Emma) are tags for my friends. My friends are $PEOPLE_PLACEHOLDER. " +
-                "Write a friend's name with @ in front, spelled exactly as in this list, also when I said it without @ or it was misheard. " +
-                "Write all other names as plain text, without @.",
+            "Names with @ in front (like @Emma) are tags for people I know. The people I know are $PEOPLE_PLACEHOLDER. " +
+                "Write such a name with @ in front, spelled exactly as in this list, also when I said it without @ or it was misheard. " +
+                "Write all other names as plain text, without @." +
+                // only said when this entry needs it: two people in it share a name
+                if (numberedNames) {
+                    " Some of them share a name, so a name can end in a number (like @Bart2). " +
+                        "That is a different person than the name without the number: keep each one exactly as I wrote it."
+                } else {
+                    ""
+                },
         )
 
     private fun compose(rules: List<String>): String =
@@ -110,10 +117,26 @@ object DictationPrompt {
         val text: String,
         /** Topic tag as written (`#awake`) to its id. */
         val topics: Map<String, String>,
-    )
+        /**
+         * Each person mentioned in the entry: the name the model sees (`@Bart`) to the id of the
+         * person meant. Two people with the same name get different names here (`@Bart`,
+         * `@Bart2`), so the answer still says which one is which.
+         */
+        val mentions: Map<String, String> = emptyMap(),
+    ) {
+        /** True when the entry mentions two people who share a name. */
+        val hasNumberedNames: Boolean
+            get() = mentions.keys.any { NUMBERED.matches(it) && it.dropLastWhile(Char::isDigit) in mentions }
+
+        /** The names the model has to know to keep these mentions: `Bart`, `Bart2`. */
+        val names: List<String>
+            get() = mentions.keys.map { it.removePrefix("@") }
+    }
+
+    private val NUMBERED = Regex(""".*\D\d+""")
 
     /**
-     * `[@Emma](person:Emma)` becomes `@Emma` and `[#awake](topic:awake)` becomes `#awake`.
+     * `[@Emma](person:<id>)` becomes `@Emma` and `[#awake](topic:awake)` becomes `#awake`.
      * Broken or nested codes are left alone; [OutputValidator] deals with those.
      */
     fun simplify(body: String): Simplified {
@@ -123,8 +146,30 @@ object DictationPrompt {
                 topics[m.groupValues[1]] = m.groupValues[2].trim()
                 m.groupValues[1]
             }
-        text = PERSON_CODE.replace(text) { m -> "@" + m.groupValues[1].trim().ifEmpty { m.groupValues[2].trim() } }
-        return Simplified(text, topics)
+        val mentions = LinkedHashMap<String, String>()
+        fun find(handle: String): String? = mentions.keys.firstOrNull { it.equals(handle, ignoreCase = true) }
+        text =
+            PERSON_CODE.replace(text) { m ->
+                val id = m.groupValues[2].trim()
+                val base = "@" + m.groupValues[1].trim().ifEmpty { id }
+                // the same name for someone else: Bart, Bart2, Bart3
+                var handle = base
+                var n = 1
+                while (true) {
+                    val taken = find(handle)
+                    if (taken == null) {
+                        mentions[handle] = id
+                        break
+                    }
+                    if (mentions[taken] == id) {
+                        handle = taken
+                        break
+                    }
+                    handle = base + ++n
+                }
+                handle
+            }
+        return Simplified(text, topics, mentions)
     }
 
     /**
@@ -159,8 +204,8 @@ object DictationPrompt {
     }
 
     /**
-     * Fills {{PEOPLE}} from June's People tags (`@Name`), e.g. "Emma, Noor and Sam".
-     * With no People tags it says so, so rule 6 still reads naturally.
+     * Fills {{PEOPLE}} with the names of the people in the journal, e.g. "Emma, Noor and Sam".
+     * With nobody yet it says so, so the rule still reads naturally.
      */
     fun peopleList(people: List<String>): String {
         val names = people.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
@@ -178,25 +223,34 @@ object DictationPrompt {
      *
      * @param body the simplified entry, or null for the full prompt.
      */
-    fun buildSystemPrompt(template: String, people: List<String>, body: String? = null): String {
+    fun buildSystemPrompt(
+        template: String,
+        people: List<String>,
+        body: String? = null,
+        /** The entry mentions two people who share a name, told apart by a number (`@Bart2`). */
+        numberedNames: Boolean = false,
+    ): String {
         if (body == null || template != DEFAULT_SYSTEM_PROMPT) {
             return template.replace(PEOPLE_PLACEHOLDER, peopleList(if (body == null) people else relevantPeople(people, body)))
         }
-        return compose(rules(featuresOf(body))).replace(PEOPLE_PLACEHOLDER, peopleList(relevantPeople(people, body)))
+        return compose(rules(featuresOf(body), numberedNames)).replace(PEOPLE_PLACEHOLDER, peopleList(relevantPeople(people, body)))
     }
 
     const val MAX_PEOPLE = 40
 
-    /**
-     * Everyone June knows: People tags (`@Emma`) plus the people recorded on entries
-     * (JournalPerson names). Case-insensitive de-duplication; tag spelling wins.
-     */
-    fun knownPeople(tags: List<String>, personNames: List<String>): List<String> =
-        (peopleFromTags(tags) + personNames.map { it.trim() }.filter { it.isNotEmpty() })
-            .distinctBy { it.lowercase() }
-            .sortedBy { it.lowercase() }
-
-    /** People names from June tags: `@Emma` -> `Emma`. */
-    fun peopleFromTags(tags: List<String>): List<String> =
-        tags.filter { it.startsWith("@") }.map { it.removePrefix("@").trim() }.filter { it.isNotEmpty() }.distinct().sortedBy { it.lowercase() }
+    /** The names to tell the model about: everyone's, once each, sorted. Namesakes share one. */
+    fun names(people: Collection<CleanupPerson>): List<String> =
+        people.map { it.name.trim() }.filter { it.isNotEmpty() }.distinctBy { it.lowercase() }.sortedBy { it.lowercase() }
 }
+
+/**
+ * A person as the cleanup needs to know them. Several people can have the same [name]; [note]
+ * ("brother", "work") and whether they are [onEntry] help to tell which one a name in the text means.
+ */
+data class CleanupPerson(
+    val id: String,
+    val name: String,
+    val note: String? = null,
+    /** This person is on the entry that is being cleaned up. */
+    val onEntry: Boolean = false,
+)

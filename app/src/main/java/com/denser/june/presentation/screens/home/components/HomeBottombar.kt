@@ -55,7 +55,8 @@ private data class HomeFabConfig(
 private fun rememberHomeFabConfig(
     currentTab: HomeTab,
     selectedCategory: TagCategory,
-    activeTag: String?
+    activeTag: String?,
+    activeTagName: String?
 ): HomeFabConfig {
     val activeTagCategory = if (currentTab == HomeTab.Tags && activeTag != null) {
         TagUtils.getCategoryForTag(activeTag)
@@ -81,10 +82,10 @@ private fun rememberHomeFabConfig(
 
     val contentDescription = when {
         currentTab == HomeTab.Tags && activeTag != null -> {
-            val cleanTag = TagUtils.getCleanTagName(activeTag)
+            val cleanTag = activeTagName ?: TagUtils.getCleanTagName(activeTag)
             when (activeTagCategory) {
                 TagCategory.Spaces -> "New entry in $cleanTag"
-                TagCategory.People -> "New entry with @$cleanTag"
+                TagCategory.People -> "New entry with $cleanTag"
                 TagCategory.Topics -> "New entry with #$cleanTag"
                 null -> stringResource(R.string.new_journal)
             }
@@ -93,7 +94,7 @@ private fun rememberHomeFabConfig(
         else -> stringResource(R.string.new_journal)
     }
 
-    return remember(activeTagCategory, activeTag, selectedCategory, containerColor, contentColor, badgeColor, badgeIconRes, contentDescription) {
+    return remember(activeTagCategory, activeTag, activeTagName, selectedCategory, containerColor, contentColor, badgeColor, badgeIconRes, contentDescription) {
         HomeFabConfig(badgeIconRes, badgeColor, containerColor, contentColor, contentDescription)
     }
 }
@@ -105,7 +106,9 @@ fun HomeBottomBar(
     selectedCategory: TagCategory,
     activeTag: String?,
     onFabClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    /** The name of the person [activeTag] stands for, when it is a person. */
+    activeTagName: String? = null
 ) {
     val scope = rememberCoroutineScope()
     val animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec<Rect>()
@@ -114,7 +117,7 @@ fun HomeBottomBar(
     }
 
     val currentTab = HomeTab.entries[pagerState.currentPage]
-    val fabConfig = rememberHomeFabConfig(currentTab, selectedCategory, activeTag)
+    val fabConfig = rememberHomeFabConfig(currentTab, selectedCategory, activeTag, activeTagName)
 
     val animatedFabContainerColor by animateColorAsState(
         targetValue = fabConfig.containerColor,

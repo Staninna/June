@@ -117,7 +117,7 @@ class DictationCleanupTest {
                 .also { server = it }
         val store = store(s)
         val seen = mutableListOf<DictationCleanup.Progress>()
-        val outcome = DictationCleanup(LocalAiClient(), store).run(body, listOf("Emma")) { seen += it }
+        val outcome = DictationCleanup(LocalAiClient(), store).run(body, listOf(CleanupPerson("Emma", "Emma"))) { seen += it }
 
         val rewrite = outcome as DictationCleanup.Outcome.Rewrite
         assertEquals("Good morning, world! Today I went to the city with [@Emma](person:Emma).", rewrite.rewrite)
@@ -322,7 +322,7 @@ class DictationCleanupTest {
             }
                 .also { server = it }
         val entry = "so uh out with [@Emma](person:Emma)\n\n[#carnaval](topic:carnaval) "
-        val outcome = DictationCleanup(LocalAiClient(), store(s)).run(entry, listOf("Emma")) as DictationCleanup.Outcome.Rewrite
+        val outcome = DictationCleanup(LocalAiClient(), store(s)).run(entry, listOf(CleanupPerson("Emma", "Emma"))) as DictationCleanup.Outcome.Rewrite
         assertFalse("no link codes go to the model", sent.single().contains("person:") || sent.single().contains("topic:"))
         assertTrue(sent.single().contains("@Emma") && sent.single().contains("#carnaval"))
         assertTrue("the topic rule is only there because the entry has a tag", sent.single().contains("topic tags"))

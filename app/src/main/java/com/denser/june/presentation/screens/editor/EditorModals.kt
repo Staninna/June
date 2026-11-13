@@ -334,7 +334,8 @@ fun EditorModals(
             person = person,
             onSave = { onAction(EditorAction.UpdatePerson(it)) },
             onRemove = { onAction(EditorAction.RemovePerson(it.id)) },
-            onDismiss = { dialogState.editingPerson = null }
+            onDismiss = { dialogState.editingPerson = null },
+            everyone = editorState.knownPeople + editorState.people
         )
     }
 

@@ -6,7 +6,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class OutputValidatorTest {
-    private val people = listOf("Emma", "Noor", "Sam")
+    private val names = listOf("Emma", "Noor", "Sam")
+    private val people = named("Emma", "Noor", "Sam")
+
+    /** People whose id is their name, like mentions written before people had ids. */
+    private fun named(vararg names: String) = names.map { CleanupPerson(id = it, name = it) }
 
     private fun v(text: String) = OutputValidator.validate(text, people, linkPlainNames = false).text
 
@@ -130,14 +134,14 @@ class OutputValidatorTest {
         val out = v(messy)
         val matches = hyphen.findAll(out).toList()
         assertEquals(listOf("@Emma", "@Sam", "@Noor"), matches.map { it.groupValues[1] })
-        assertTrue(matches.all { it.groupValues[3] in people })
+        assertTrue(matches.all { it.groupValues[3] in names })
         assertFalse(out.contains("**"))
     }
 
     @Test
     fun `topic tags survive, written as codes or as plain tags`() {
         val topics = mapOf("#awake" to "awake", "#zininin" to "zininin")
-        val r = OutputValidator.validate("Good morning.\n\n#awake #zininin", listOf("Emma"), topics = topics)
+        val r = OutputValidator.validate("Good morning.\n\n#awake #zininin", named("Emma"), topics = topics)
         assertEquals("Good morning.\n\n[#awake](topic:awake) [#zininin](topic:zininin)", r.text)
         assertTrue(r.changes.none { it.contains("square brackets") })
 
@@ -151,7 +155,7 @@ class OutputValidatorTest {
 
     @Test
     fun `simple at-tags come back as codes, also names of several words`() {
-        val r = OutputValidator.validate("Out with @Emma and @Sam de Vries, later @Nobody.", listOf("Emma", "Sam de Vries"))
+        val r = OutputValidator.validate("Out with @Emma and @Sam de Vries, later @Nobody.", named("Emma", "Sam de Vries"))
         assertEquals("Out with [@Emma](person:Emma) and [@Sam de Vries](person:Sam de Vries), later Nobody.", r.text)
     }
 
@@ -160,7 +164,7 @@ class OutputValidatorTest {
         val entry = "Movie with [@Emma](person:Emma) *tonight*.\n\n[#carnaval](topic:carnaval) "
         val s = DictationPrompt.simplify(entry)
         // a model that returns the notes unchanged
-        val r = OutputValidator.validate(s.text, listOf("Emma"), topics = s.topics)
+        val r = OutputValidator.validate(s.text, named("Emma"), topics = s.topics)
         assertEquals(entry.trim(), r.text)
         assertTrue(r.changes.isEmpty())
     }
@@ -190,7 +194,7 @@ class OutputValidatorTest {
             |---|---|
             | 1 | 2 |
             """.trimIndent()
-        val r = OutputValidator.validate(entry, listOf("Emma"), original = entry)
+        val r = OutputValidator.validate(entry, named("Emma"), original = entry)
         assertEquals(entry, r.text)
         assertTrue("changed: ${r.changes}", r.changes.isEmpty())
     }
@@ -203,7 +207,60 @@ class OutputValidatorTest {
 
     @Test
     fun `a bold link keeps its emphasis, a bold mention loses it`() {
-        val r = OutputValidator.validate("Read **[this](https://example.org)** with **[@Emma](person:Emma)**.", listOf("Emma"))
+        val r = OutputValidator.validate("Read **[this](https://example.org)** with **[@Emma](person:Emma)**.", named("Emma"))
         assertEquals("Read **[this](https://example.org)** with [@Emma](person:Emma).", r.text)
+    }
+
+    // --- several people with the same name ---------------------------------------------------
+
+    private val brother = CleanupPerson(id = "b1", name = "Bart", note = "Brother")
+    private val colleague = CleanupPerson(id = "b2", name = "Bart", note = "Work")
+    private val barts = listOf(brother, colleague, CleanupPerson(id = "e1", name = "Emma"))
+
+    @Test
+    fun `a mention from the notes stays the same person`() {
+        val s = DictationPrompt.simplify("Lunch with [@Bart](person:b2) and [@Emma](person:e1).")
+        assertEquals("Lunch with @Bart and @Emma.", s.text)
+        val r = OutputValidator.validate("Had lunch with @Bart and Emma.", barts, mentions = s.mentions)
+        assertEquals("Had lunch with [@Bart](person:b2) and [@Emma](person:e1).", r.text)
+        assertTrue(r.changes.none { it.contains("could not tell") })
+    }
+
+    @Test
+    fun `two namesakes in one entry are kept apart by a number`() {
+        val s = DictationPrompt.simplify("[@Bart](person:b1) met [@Bart](person:b2), then [@Bart](person:b1) left.")
+        assertEquals("@Bart met @Bart2, then @Bart left.", s.text)
+        assertTrue(s.hasNumberedNames)
+        assertEquals(listOf("Bart", "Bart2"), s.names)
+        val r = OutputValidator.validate("@Bart met @Bart2. Then @Bart left.", barts, mentions = s.mentions)
+        assertEquals("[@Bart](person:b1) met [@Bart](person:b2). Then [@Bart](person:b1) left.", r.text)
+    }
+
+    @Test
+    fun `a new name several people share goes to the one whose context is said nearby`() {
+        val r = OutputValidator.validate("At work I talked to Bart about the release.", barts)
+        assertEquals("At work I talked to [@Bart](person:b2) about the release.", r.text)
+        assertTrue(r.changes.none { it.contains("could not tell") })
+    }
+
+    @Test
+    fun `otherwise the namesake on the entry is meant`() {
+        val onEntry = listOf(brother.copy(onEntry = true), colleague)
+        val r = OutputValidator.validate("Bart came over.", onEntry)
+        assertEquals("[@Bart](person:b1) came over.", r.text)
+    }
+
+    @Test
+    fun `a guess between namesakes is reported`() {
+        val r = OutputValidator.validate("Bart came over.", barts)
+        assertEquals("[@Bart](person:b1) came over.", r.text)
+        assertTrue(r.changes.any { it.contains("could not tell which Bart") })
+    }
+
+    @Test
+    fun `an old mention that carries a name gets the id of that person`() {
+        val s = DictationPrompt.simplify("Coffee with [@Emma](person:Emma).")
+        val r = OutputValidator.validate("Coffee with @Emma.", barts, mentions = s.mentions)
+        assertEquals("Coffee with [@Emma](person:e1).", r.text)
     }
 }

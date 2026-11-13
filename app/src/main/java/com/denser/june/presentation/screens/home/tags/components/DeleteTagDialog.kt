@@ -41,13 +41,13 @@ fun DeleteTagDialog(
                     onClick = { },
                     label = {
                         Text(
-                            if (isPerson) TagUtils.getCleanTagName(tagName) else tagName,
+                            tagName,
                             style = MaterialTheme.typography.bodyLarge,
                             fontWeight = FontWeight.Bold
                         )
                     },
                     shape = RoundedCornerShape(12.dp),
-                    colors = TagUtils.getTagInputChipColors(tagName),
+                    colors = TagUtils.getTagInputChipColors(if (isPerson) "@" else tagName),
                     border = null
                 )
                 Text(

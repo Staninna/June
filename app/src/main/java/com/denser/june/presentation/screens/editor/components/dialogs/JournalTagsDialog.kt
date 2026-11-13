@@ -30,9 +30,10 @@ import com.denser.june.core.domain.model.JournalPerson
 import com.denser.june.core.domain.model.distinctPeople
 import com.denser.june.core.domain.model.enums.TagCategory
 import com.denser.june.core.domain.model.unifyPeople
+import com.denser.june.core.domain.model.resolvePeople
+import com.denser.june.core.domain.model.sharedNames
 import com.denser.june.core.domain.model.withPerson
 import com.denser.june.presentation.screens.editor.components.people.PeoplePickerSheet
-import com.denser.june.presentation.screens.editor.components.people.PersonAvatar
 import com.denser.june.presentation.screens.editor.components.people.PersonChip
 import com.denser.june.presentation.screens.editor.components.people.PersonDetailSheet
 import com.denser.june.presentation.screens.editor.components.people.PersonSuggestionChip
@@ -73,7 +74,7 @@ fun JournalTagsDialog(
     fun addLabel(label: String) {
         val unified = unifyPeople(localTags + label.trim(), localPeople, knownPeople)
         localTags = unified.tags
-        localPeople = unified.people
+        localPeople = unified.people.resolvePeople(knownPeople)
     }
 
     var tagInput by remember { mutableStateOf("") }
@@ -83,9 +84,24 @@ fun JournalTagsDialog(
     val focusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
 
+    /** Tags are looked up in the journal; people are suggested from [knownPeople] right here. */
+    fun search(input: String) = onSearchTags(if (input.startsWith("@")) "" else input)
+
+    val sharedNames = remember(knownPeople, localPeople) { (knownPeople + localPeople).distinctPeople().sharedNames() }
+    val personMatches = remember(tagInput, knownPeople, localPeople) {
+        if (!tagInput.startsWith("@")) emptyList()
+        else {
+            val query = tagInput.drop(1).trim()
+            knownPeople.filter { k -> localPeople.none { it.isSamePerson(k) } }
+                .filter { query.isEmpty() || it.name.contains(query, ignoreCase = true) || it.note.orEmpty().contains(query, ignoreCase = true) }
+                .sortedBy { !it.name.trim().startsWith(query, ignoreCase = true) }
+                .take(12)
+        }
+    }
+
     fun onInsertPrefix(prefix: String) {
         tagInput = prefix
-        onSearchTags(prefix)
+        search(prefix)
         focusManager.clearFocus()
         focusRequester.requestFocus()
     }
@@ -123,7 +139,8 @@ fun JournalTagsDialog(
                 localPeople = localPeople.map { if (it.id == updated.id) updated else it }.distinctPeople()
             },
             onRemove = { removed -> localPeople = localPeople.filterNot { it.id == removed.id } },
-            onDismiss = { editingPersonId = null }
+            onDismiss = { editingPersonId = null },
+            everyone = knownPeople + localPeople
         )
     }
 
@@ -218,13 +235,20 @@ fun JournalTagsDialog(
                         tagInput = tagInput,
                         onInputChange = {
                             tagInput = it
-                            onSearchTags(it)
+                            search(it)
                         },
                         suggestions = suggestions,
+                        people = personMatches,
+                        sharedNames = sharedNames,
+                        onAddPerson = { person ->
+                            addPerson(person)
+                            tagInput = ""
+                            search("")
+                        },
                         onAddTag = { newTag ->
                             if (newTag.isNotBlank()) addLabel(newTag)
                             tagInput = ""
-                            onSearchTags("")
+                            search("")
                         },
                         onInsertPrefix = ::onInsertPrefix,
                         focusRequester = focusRequester
@@ -265,6 +289,7 @@ fun JournalTagsDialog(
                                     PeopleSectionBody(
                                         people = localPeople,
                                         recent = recent,
+                                        sharedNames = sharedNames,
                                         emptyMessage = stringResource(spec.emptyMessageRes),
                                         chipColor = spec.containerColor,
                                         onPersonClick = {
@@ -296,7 +321,7 @@ fun JournalTagsDialog(
                         onAddClick = {
                             val prefix = category.prefix ?: ""
                             tagInput = prefix
-                            onSearchTags(prefix)
+                            search(prefix)
                             focusManager.clearFocus()
                             focusRequester.requestFocus()
                         }
@@ -425,6 +450,7 @@ fun TagSectionCard(
 private fun PeopleSectionBody(
     people: List<JournalPerson>,
     recent: List<JournalPerson>,
+    sharedNames: Set<String>,
     emptyMessage: String,
     chipColor: Color,
     onPersonClick: (JournalPerson) -> Unit,
@@ -464,9 +490,10 @@ private fun PeopleSectionBody(
                 modifier = Modifier.padding(start = 4.dp)
             )
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(recent, key = { it.identityKey }) { person ->
+                items(recent, key = { it.id }) { person ->
                     PersonSuggestionChip(
                         person = person,
+                        showContext = person.name.trim().lowercase() in sharedNames,
                         onClick = { onAddRecent(person) },
                         modifier = Modifier.animateItem()
                     )
@@ -483,7 +510,11 @@ fun TagInputArea(
     suggestions: List<String>,
     onAddTag: (String) -> Unit,
     onInsertPrefix: (String) -> Unit,
-    focusRequester: FocusRequester
+    focusRequester: FocusRequester,
+    /** People matching an `@name` being typed. */
+    people: List<JournalPerson> = emptyList(),
+    sharedNames: Set<String> = emptySet(),
+    onAddPerson: (JournalPerson) -> Unit = {}
 ) {
     var textFieldValue by remember {
         mutableStateOf(TextFieldValue(text = tagInput, selection = TextRange(tagInput.length)))
@@ -517,22 +548,33 @@ fun TagInputArea(
                 .navigationBarsPadding()
                 .imePadding()
         ) {
-            val showSuggestions = suggestions.isNotEmpty() && tagInput.isNotBlank()
+            val showSuggestions = suggestions.isNotEmpty() && tagInput.isNotBlank() && !isPersonInput
 
-            if (showSuggestions) {
+            if (isPersonInput && people.isNotEmpty()) {
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    items(people, key = { it.id }) { person ->
+                        PersonSuggestionChip(
+                            person = person,
+                            showContext = person.name.trim().lowercase() in sharedNames,
+                            onClick = { onAddPerson(person) }
+                        )
+                    }
+                }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+            } else if (showSuggestions) {
                 LazyRow(
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     items(suggestions) { suggestion ->
-                        val isPerson = JournalPerson.isPersonLabel(suggestion)
                         SuggestionChip(
                             onClick = { onAddTag(suggestion) },
-                            label = { Text(if (isPerson) JournalPerson.nameFromLabel(suggestion) else suggestion) },
-                            icon = if (isPerson) {
-                                { PersonAvatar(JournalPerson(name = JournalPerson.nameFromLabel(suggestion)), size = 22.dp) }
-                            } else null,
+                            label = { Text(suggestion) },
                             colors = SuggestionChipDefaults.suggestionChipColors(
                                 containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
                             ),

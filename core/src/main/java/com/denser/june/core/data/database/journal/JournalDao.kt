@@ -55,7 +55,7 @@ interface JournalDao {
             id IN (
                 SELECT ref.id 
                 FROM journal_tag_cross_ref ref 
-                WHERE ref.tagName LIKE '%' || :query || '%'
+                WHERE ref.tagName LIKE '%' || :query || '%' AND ref.tagName NOT LIKE '@%'
             ) OR
         (
             (CASE strftime('%m', dateTime / 1000, 'unixepoch')

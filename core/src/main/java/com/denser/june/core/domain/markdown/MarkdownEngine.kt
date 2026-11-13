@@ -211,7 +211,7 @@ object MarkdownEngine {
             tags = combinedTags.distinct(),
             people = frontmatter?.people.orEmpty()
                 .filter { it.isNotBlank() }
-                .map { com.denser.june.core.domain.model.JournalPerson(name = it.trim()) },
+                .map { com.denser.june.core.domain.model.JournalPerson.named(it) },
             createdAt = finalCreatedAt,
             updatedAt = updatedAt,
             dateTime = finalDateTime,

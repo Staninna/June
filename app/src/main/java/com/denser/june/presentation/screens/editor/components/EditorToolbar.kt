@@ -40,6 +40,10 @@ import com.denser.hyphen.model.TriggerState
 import com.denser.hyphen.state.HyphenTextState
 import com.denser.june.core.R
 import com.denser.june.presentation.utils.TagUtils
+import androidx.compose.ui.res.stringResource
+import com.denser.june.core.domain.model.JournalPerson
+import com.denser.june.core.domain.model.sharedNames
+import com.denser.june.presentation.screens.editor.components.people.PersonAvatar
 
 @Composable
 fun EditorToolbar(
@@ -49,6 +53,9 @@ fun EditorToolbar(
     tagSuggestions: List<String> = emptyList(),
     currentTags: List<String> = emptyList(),
     onTagSelect: (tag: String) -> Unit = {},
+    /** Everyone a mention can be of: the people on the entry first, then the rest of the journal's. */
+    people: List<JournalPerson> = emptyList(),
+    onPersonSelect: (JournalPerson) -> Unit = {},
 ) {
     val triggerPrefix = activeTrigger?.config?.trigger
     val isTagMode = triggerPrefix == "@" || triggerPrefix == "#"
@@ -66,7 +73,14 @@ fun EditorToolbar(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(modifier = Modifier.weight(1f).height(40.dp)) {
-                if (isTagMode) {
+                if (triggerPrefix == "@" && activeTrigger != null) {
+                    PersonChipsContent(
+                        trigger = activeTrigger,
+                        people = people,
+                        hyphenState = state,
+                        onPersonSelect = onPersonSelect,
+                    )
+                } else if (isTagMode) {
                     TagChipsContent(
                         trigger = activeTrigger,
                         tagSuggestions = tagSuggestions,
@@ -117,6 +131,77 @@ fun EditorToolbar(
                     modifier = Modifier.size(20.dp),
                 )
             }
+        }
+    }
+}
+
+/**
+ * Who to mention after typing `@`. People who share a name show their context ("Bart · Work"),
+ * and the mention remembers which person was picked, not just the name.
+ */
+@Composable
+private fun PersonChipsContent(
+    trigger: TriggerState,
+    people: List<JournalPerson>,
+    hyphenState: HyphenTextState,
+    onPersonSelect: (JournalPerson) -> Unit,
+) {
+    val query = trigger.query.trim()
+    val sharedNames = remember(people) { people.sharedNames() }
+    val matches = remember(people, query) {
+        people.filter { query.isBlank() || it.name.contains(query, ignoreCase = true) }
+            // names that start with what was typed come first
+            .sortedBy { !it.name.trim().startsWith(query, ignoreCase = true) }
+            .take(20)
+    }
+    val showCreate = query.isNotBlank() && people.none { it.hasName(query) }
+
+    fun mention(person: JournalPerson) {
+        onPersonSelect(person)
+        hyphenState.completeMention(id = person.id, display = person.name.trim(), trigger = trigger)
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxHeight()
+            .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        matches.forEach { person ->
+            FilterChip(
+                selected = false,
+                onClick = { mention(person) },
+                leadingIcon = { PersonAvatar(person, size = 22.dp) },
+                label = {
+                    Text(
+                        if (person.name.trim().lowercase() in sharedNames) person.displayName else person.name.trim(),
+                        fontSize = 13.sp,
+                    )
+                },
+                shape = RoundedCornerShape(8.dp),
+            )
+        }
+
+        if (matches.isEmpty() && !showCreate) {
+            Text(
+                text = stringResource(R.string.people_search_hint),
+                style = TextStyle(
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                ),
+                modifier = Modifier.padding(horizontal = 4.dp),
+            )
+        }
+
+        if (showCreate) {
+            SuggestionChip(
+                onClick = { mention(JournalPerson(name = query)) },
+                label = { Text("@$query", fontSize = 13.sp, fontWeight = FontWeight.SemiBold) },
+                colors = TagUtils.getTagSuggestionChipColors("@$query"),
+                border = null,
+                shape = RoundedCornerShape(8.dp),
+            )
         }
     }
 }

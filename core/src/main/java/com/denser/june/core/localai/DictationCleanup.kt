@@ -9,7 +9,7 @@ import java.security.MessageDigest
 import java.util.UUID
 
 /**
- * Runs one "Clean up dictation" request: prompt with People tags, call, validate.
+ * Runs one "Clean up dictation" request: prompt with the journal's people, call, validate.
  *
  * The server generates in a background job, and this class only asks for its state in short calls.
  * So there is no timeout that depends on how long the model needs, and the job carries on while
@@ -74,7 +74,7 @@ class DictationCleanup(
                 }
     }
 
-    suspend fun run(body: String, people: List<String>, onProgressRaw: (Progress) -> Unit = {}): Outcome {
+    suspend fun run(body: String, people: List<CleanupPerson>, onProgressRaw: (Progress) -> Unit = {}): Outcome {
         val s = prefs.current
         val token = s.token
         val baseUrl = s.baseUrl
@@ -82,7 +82,9 @@ class DictationCleanup(
         // the model gets "@Emma" and "#awake" instead of June's link codes; finish() puts them back
         val simple = DictationPrompt.simplify(body)
         val notes = simple.text
-        val prompt = DictationPrompt.buildSystemPrompt(s.systemPromptTemplate, people, notes)
+        // everyone's name once, plus the names this entry uses to keep namesakes apart (Bart2)
+        val names = (DictationPrompt.names(people) + simple.names).distinctBy { it.lowercase() }
+        val prompt = DictationPrompt.buildSystemPrompt(s.systemPromptTemplate, names, notes, simple.hasNumberedNames)
         val fingerprint = fingerprint(prompt, notes)
         // how much of the prompt is the entry itself: the rewrite will be about that long
         val share = notes.length.toDouble() / (prompt.length + notes.length).coerceAtLeast(1)
@@ -231,7 +233,7 @@ class DictationCleanup(
     private suspend fun finish(
         ended: Ended,
         body: String,
-        people: List<String>,
+        people: List<CleanupPerson>,
         baseUrl: String,
         token: String,
         ackId: String?,
@@ -247,7 +249,13 @@ class DictationCleanup(
         return when (ended) {
             is Ended.Problem -> ended.outcome
             is Ended.Text -> {
-                val result = OutputValidator.validate(ended.completion.text, people, topics = simple.topics, original = simple.text)
+                val result = OutputValidator.validate(
+                        ended.completion.text,
+                        people,
+                        topics = simple.topics,
+                        original = simple.text,
+                        mentions = simple.mentions,
+                    )
                 val changes =
                     if (ended.completion.finishReason == FINISH_LENGTH) result.changes + CHANGE_CUT_OFF else result.changes
                 if (result.text.isBlank()) Outcome.EmptyResult else Outcome.Rewrite(body, result.text, changes)

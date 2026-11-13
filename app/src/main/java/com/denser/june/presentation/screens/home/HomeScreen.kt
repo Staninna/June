@@ -67,6 +67,7 @@ fun HomeScreen() {
 
     val tagsVM: TagsVM = koinViewModel()
     val activeTag by tagsVM.selectedPrimaryTag.collectAsStateWithLifecycle()
+    val knownPeople by tagsVM.knownPeople.collectAsStateWithLifecycle()
     val selectedCategory by tagsVM.selectedCategory.collectAsStateWithLifecycle()
 
     val journalsVM: JournalsVM = koinViewModel()
@@ -219,6 +220,7 @@ fun HomeScreen() {
                 pagerState = pagerState,
                 selectedCategory = selectedCategory,
                 activeTag = activeTag,
+                activeTagName = knownPeople.firstOrNull { it.key == activeTag }?.displayName,
                 onFabClick = {
                     handleFabClick(
                         currentTab = HomeTab.entries[pagerState.currentPage],

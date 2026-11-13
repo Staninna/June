@@ -24,6 +24,7 @@ import com.denser.june.core.R
 import com.denser.june.core.domain.model.enums.TagCategory
 import com.denser.june.core.domain.model.Journal
 import com.denser.june.core.domain.model.JournalPerson
+import com.denser.june.core.domain.model.sharedNames
 import android.widget.Toast
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.pluralStringResource
@@ -73,15 +74,16 @@ fun TagsPage() {
     val knownPeople by viewModel.knownPeople.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
-    // A person label (`@Name`) stands for a person: look up who, so they show with their details.
-    fun personFor(label: String): JournalPerson {
-        val name = JournalPerson.nameFromLabel(label)
-        return knownPeople.firstOrNull { it.name.trim().equals(name, ignoreCase = true) } ?: JournalPerson(name = name)
+    // A person label (`@<id>`) stands for a person: look up who.
+    val peopleByKey = remember(knownPeople) { knownPeople.associateBy { it.key } }
+    val sharedNames = remember(knownPeople) { knownPeople.sharedNames() }
+    /** What a label is called on screen: a person by name, with context when the name is shared. */
+    fun labelText(label: String): String {
+        val person = peopleByKey[label] ?: return TagUtils.getCleanTagName(label)
+        return if (person.name.trim().lowercase() in sharedNames) person.displayName else person.name.trim()
     }
     val isPeopleTab = selectedCategory == TagCategory.People
-    val selectedPerson = remember(selectedPrimaryTag, knownPeople, isPeopleTab) {
-        selectedPrimaryTag?.takeIf { isPeopleTab && JournalPerson.isPersonLabel(it) }?.let(::personFor)
-    }
+    val selectedPerson = selectedPrimaryTag?.takeIf { isPeopleTab }?.let { peopleByKey[it] }
     var showPersonSheet by remember { mutableStateOf(false) }
 
     val navigator = koinInject<AppNavigator>()
@@ -160,12 +162,12 @@ fun TagsPage() {
                             onClick = { viewModel.selectPrimaryTag(fullTag) },
                             modifier = Modifier.height(40.dp),
                             shape = RoundedCornerShape(16.dp),
-                            leadingIcon = if (isPeopleTab) {
-                                { PersonAvatar(personFor(fullTag), size = 26.dp) }
-                            } else null,
+                            leadingIcon = peopleByKey[fullTag]?.let { person ->
+                                { PersonAvatar(person, size = 26.dp) }
+                            },
                             label = {
                                 Text(
-                                    text = if (isPeopleTab) JournalPerson.nameFromLabel(fullTag) else fullTag,
+                                    text = if (isPeopleTab) labelText(fullTag) else fullTag,
                                     style = MaterialTheme.typography.bodyLarge,
                                     fontWeight = if (isSelected) FontWeight.Medium else FontWeight.Normal
                                 )
@@ -378,6 +380,7 @@ fun TagsPage() {
             FilterBottomSheet(
                 sheetState = filterSheetState,
                 availableFilters = availableFilters,
+                labelText = ::labelText,
                 selectedFilters = selectedFilters,
                 onToggle = { viewModel.toggleFilter(it) },
                 onClearAll = { viewModel.clearFilters() },
@@ -429,10 +432,11 @@ fun TagsPage() {
             } else {
                 PersonDetailSheet(
                     person = person,
-                    onSave = { updated -> viewModel.updateCurrentPerson(person, updated) },
+                    onSave = viewModel::updatePerson,
                     onRemove = { showDeleteDialog = true },
                     onDismiss = { showPersonSheet = false },
-                    removeLabel = stringResource(R.string.people_remove_everywhere)
+                    removeLabel = stringResource(R.string.people_remove_everywhere),
+                    everyone = knownPeople
                 )
             }
         }
@@ -453,7 +457,7 @@ fun TagsPage() {
 
             if (showDeleteDialog) {
                 DeleteTagDialog(
-                    tagName = selectedPrimaryTag!!,
+                    tagName = selectedPerson?.displayName ?: selectedPrimaryTag!!,
                     isPerson = selectedPerson != null,
                     onDismiss = { showDeleteDialog = false },
                     onConfirm = {

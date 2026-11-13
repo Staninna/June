@@ -25,6 +25,9 @@ import com.denser.june.core.domain.model.Journal
 import com.denser.june.core.domain.model.JournalPerson
 import com.denser.june.core.domain.model.distinctPeople
 import com.denser.june.core.domain.model.unifyPeople
+import com.denser.june.core.domain.model.renameMentions
+import com.denser.june.core.domain.model.resolvePeople
+import com.denser.june.core.localai.CleanupPerson
 import com.denser.june.core.domain.model.withPerson
 import com.denser.june.core.domain.model.JournalAudio
 import com.denser.june.core.domain.model.JournalTheme
@@ -87,16 +90,15 @@ class EditorVM(
             val initialTitle = editorRoute?.initialTitle ?: ""
             val initialContent = editorRoute?.initialContent ?: ""
             val initialEmoji = editorRoute?.initialEmoji
-            val initialLabels = unifyPeople(editorRoute?.initialTags ?: emptyList(), emptyList())
+            val (initialPeople, initialTags) = (editorRoute?.initialTags ?: emptyList()).partition(JournalPerson::isPersonLabel)
             EditorState(
                 journalId = journalId,
                 title = initialTitle,
                 content = initialContent,
                 emoji = initialEmoji,
                 dateTime = routeDate ?: getTodayAtMidnight(),
-                tags = initialLabels.tags,
-                people = initialLabels.people,
-                hydratePeople = journalId == null && initialLabels.people.isNotEmpty(),
+                tags = initialTags,
+                pendingPeople = initialPeople,
                 isDraft = true,
                 isLoading = journalId != null,
                 isDirty = initialTitle.isNotBlank() || initialContent.isNotBlank() || initialEmoji != null
@@ -111,6 +113,12 @@ class EditorVM(
     // --- Local AI: "Clean up dictation" ---------------------------------------------------------
     val isLocalAiEnabled: StateFlow<Boolean> =
         localAiPrefs.settings.map { it.enabled }.stateIn(viewModelScope, SharingStarted.Eagerly, localAiPrefs.current.enabled)
+
+    /** The review shows the texts as in the entry, or as Markdown. Remembered between cleanups. */
+    val isCleanupReviewFormatted: StateFlow<Boolean> =
+        localAiPrefs.settings.map { it.reviewFormatted }.stateIn(viewModelScope, SharingStarted.Eagerly, localAiPrefs.current.reviewFormatted)
+
+    fun setCleanupReviewFormatted(formatted: Boolean) = localAiPrefs.setReviewFormatted(formatted)
 
     /** Until the entry has a journal id, its cleanup run is known by this key. */
     private val draftKey = "draft:" + java.util.UUID.randomUUID()
@@ -181,12 +189,12 @@ class EditorVM(
             viewModelScope.launch { _uiEvent.send(context.getString(R.string.cleanup_empty_body)) }
             return
         }
-        val entryPeople = _state.value.people.map { it.name }
+        val entryPeople = _state.value.people
         cleanupSession.start(cleanupKey, canOpenEntry = _state.value.journalId != null, body = body) {
-            DictationPrompt.knownPeople(
-                journalRepo.getUniqueTags().first(),
-                journalRepo.getKnownPeople().first().map { it.name } + entryPeople,
-            )
+            // the people on this entry first: a name several people share most likely means them
+            (entryPeople + journalRepo.getKnownPeople().first()).distinctPeople().map { person ->
+                CleanupPerson(person.id, person.name, person.note, onEntry = entryPeople.any { it.id == person.id })
+            }
         }
     }
 
@@ -209,6 +217,10 @@ class EditorVM(
         // Undo goes back to what is in the editor now, which may be newer than what was cleaned up
         contentBeforeCleanup = currentMarkdown()
         replaceBody(review.rewrite)
+        // people the rewrite names are on the entry now
+        val known = _state.value.knownPeople
+        val named = MENTIONED_PERSON.findAll(review.rewrite).mapNotNull { m -> known.firstOrNull { it.id == m.groupValues[1] } }.toList()
+        if (named.isNotEmpty()) updateState { st -> st.copy(people = named.fold(st.people) { all, person -> all.withPerson(person) }) }
         cleanupSession.clear()
         _cleanupApplied.trySend(Unit)
     }
@@ -279,11 +291,13 @@ class EditorVM(
         viewModelScope.launch {
             journalRepo.getKnownPeople().collect { known ->
                 _state.update { st ->
-                    // A new entry started from a person label only knows the name: fill in the rest.
-                    val people = if (!st.hydratePeople) st.people else st.people.map { person ->
-                        known.firstOrNull { it.isSamePerson(person) } ?: person
+                    // A new entry started from a person: now that people are loaded, put them on it.
+                    val started = st.pendingPeople.mapNotNull { label ->
+                        known.firstOrNull { it.key == label }
+                            ?: JournalPerson.nameFromLabel(label).takeIf { it.isNotEmpty() }?.let(JournalPerson::named)
                     }
-                    st.copy(knownPeople = known, people = people, hydratePeople = false)
+                    val people = started.fold(st.people) { all, person -> all.withPerson(person) }.resolvePeople(known)
+                    st.copy(knownPeople = known, people = people, pendingPeople = emptyList())
                 }
             }
         }
@@ -397,30 +411,27 @@ class EditorVM(
 
             is EditorAction.UpdateTags -> updateState { st ->
                 val unified = unifyPeople(action.tags, st.people, st.knownPeople)
-                st.copy(tags = unified.tags, people = unified.people)
+                st.copy(tags = unified.tags, people = unified.people.resolvePeople(st.knownPeople))
             }
             is EditorAction.UpdateLabels -> {
-                val before = _state.value.people
-                val unified = unifyPeople(action.tags, action.people, _state.value.knownPeople)
-                updateState { it.copy(tags = unified.tags, people = unified.people) }
-                unified.people.forEach { person ->
-                    val old = before.firstOrNull { it.id == person.id }
-                        ?: _state.value.knownPeople.firstOrNull { it.isSamePerson(person) }
-                    if (old != null) updatePersonEverywhere(old, person)
-                }
+                val before = _state.value
+                val unified = unifyPeople(action.tags, action.people, before.knownPeople)
+                val people = unified.people.resolvePeople(before.knownPeople)
+                updateState { it.copy(tags = unified.tags, people = people) }
+                people.forEach { person -> updatePersonEverywhere(before.personWithId(person.id), person) }
             }
             is EditorAction.AddPerson -> {
+                val before = _state.value
                 updateState { st -> st.copy(people = st.people.withPerson(action.person)) }
                 // Linking a contact while adding counts for the person, not just for this entry.
-                _state.value.knownPeople.firstOrNull { it.isSamePerson(action.person) }
-                    ?.let { updatePersonEverywhere(it, action.person) }
+                updatePersonEverywhere(before.personWithId(action.person.id), action.person)
             }
             is EditorAction.UpdatePerson -> {
-                val old = _state.value.people.firstOrNull { it.id == action.person.id }
+                val before = _state.value
                 updateState { st ->
-                    st.copy(people = st.people.map { if (it.id == action.person.id) action.person else it }.distinctPeople())
+                    st.copy(people = st.people.map { if (it.id == action.person.id) action.person else it })
                 }
-                if (old != null) updatePersonEverywhere(old, action.person)
+                updatePersonEverywhere(before.personWithId(action.person.id), action.person)
             }
             is EditorAction.RemovePerson -> updateState { st ->
                 st.copy(people = st.people.filterNot { it.id == action.id })
@@ -645,10 +656,20 @@ class EditorVM(
     }
 
     /** A person is the same on every entry, so an edit made here is written to all of them. */
-    private fun updatePersonEverywhere(old: JournalPerson, updated: JournalPerson) {
-        if (old.name == updated.name && old.note == updated.note && old.contactLookupKey == updated.contactLookupKey) return
-        viewModelScope.launch { journalRepo.updatePerson(old, updated) }
+    private fun updatePersonEverywhere(old: JournalPerson?, updated: JournalPerson) {
+        if (old == null || old == updated) return
+        // the text on screen follows a new name right away; other entries are rewritten in storage
+        if (old.name != updated.name && _state.value.isMarkdownEnabled && hyphenState.text.isNotEmpty()) {
+            val markdown = hyphenState.toMarkdown()
+            val renamed = renameMentions(markdown, updated)
+            if (renamed != markdown) replaceBody(renamed)
+        }
+        viewModelScope.launch { journalRepo.updatePerson(updated) }
     }
+
+    /** The person as the journal knew them before an edit: on this entry, or on any other. */
+    private fun EditorState.personWithId(id: String): JournalPerson? =
+        people.firstOrNull { it.id == id } ?: knownPeople.firstOrNull { it.id == id }
 
     private fun updateState(update: (EditorState) -> EditorState) {
         _state.update { currentState ->
@@ -1132,3 +1153,5 @@ class EditorVM(
         }
     }
 }
+
+private val MENTIONED_PERSON = Regex("""\]\(\s*person\s*:\s*([^()\n]+?)\s*\)""")

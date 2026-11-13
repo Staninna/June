@@ -1,5 +1,6 @@
 package com.denser.june.presentation.screens.editor
 
+import com.denser.june.core.localai.CleanupPerson
 import com.denser.june.core.localai.DictationCleanup
 import com.denser.june.core.localai.TextDiff
 import kotlinx.coroutines.CoroutineScope
@@ -47,7 +48,7 @@ class CleanupSession(private val cleanup: DictationCleanup) {
     val snapshot: StateFlow<Snapshot> = _snapshot.asStateFlow()
 
     /** Starts a run for [entryKey]; a run that is still going is replaced. */
-    fun start(entryKey: String, canOpenEntry: Boolean, body: String, people: suspend () -> List<String>) {
+    fun start(entryKey: String, canOpenEntry: Boolean, body: String, people: suspend () -> List<CleanupPerson>) {
         job?.cancel()
         val working = CleanupUiState.Working()
         _snapshot.update { it.copy(entryKey = entryKey, canOpenEntry = canOpenEntry, state = working, minimized = false) }

@@ -195,23 +195,6 @@ fun LocalAiSettingsScreen(viewModel: LocalAiVM = koinViewModel()) {
                         )
                     }
                 }
-
-                item {
-                    Row(Modifier.padding(horizontal = 28.dp, vertical = 12.dp)) {
-                        Icon(
-                            painterResource(R.drawable.info_24px),
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(18.dp),
-                        )
-                        Spacer(Modifier.width(12.dp))
-                        Text(
-                            stringResource(R.string.local_ai_privacy_note),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
             }
         }
     }

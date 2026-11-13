@@ -167,16 +167,18 @@ class FakeJournalRepository : JournalRepository {
             _journalFlow.value = db.values.filter { j -> j.deletedAt == null }.toList()
         }
     }
-    override suspend fun updatePerson(
-        old: com.denser.june.core.domain.model.JournalPerson,
-        updated: com.denser.june.core.domain.model.JournalPerson
-    ) {
+    override suspend fun updatePerson(updated: com.denser.june.core.domain.model.JournalPerson) {
         db.keys.forEach { id ->
             val journal = db[id] ?: return@forEach
-            val people = journal.people.map {
-                if (it.isSamePerson(old)) it.copy(name = updated.name, note = updated.note, contactLookupKey = updated.contactLookupKey) else it
-            }
+            val people = journal.people.map { if (it.isSamePerson(updated)) updated else it }
             if (people != journal.people) db[id] = journal.copy(people = people)
+        }
+        _journalFlow.value = db.values.filter { j -> j.deletedAt == null }.toList()
+    }
+    override suspend fun removePerson(personId: String) {
+        db.keys.forEach { id ->
+            val journal = db[id] ?: return@forEach
+            db[id] = journal.copy(people = journal.people.filterNot { it.id == personId })
         }
         _journalFlow.value = db.values.filter { j -> j.deletedAt == null }.toList()
     }

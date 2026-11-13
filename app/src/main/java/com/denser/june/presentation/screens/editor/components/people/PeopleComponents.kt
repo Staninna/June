@@ -326,6 +326,8 @@ fun PersonSuggestionChip(
     person: JournalPerson,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    /** Someone else has the same name: show the context too ("Bart · Work"). */
+    showContext: Boolean = false,
 ) {
     Surface(
         onClick = onClick,
@@ -341,12 +343,12 @@ fun PersonSuggestionChip(
             PersonAvatar(person, size = 26.dp)
             Spacer(Modifier.width(6.dp))
             Text(
-                text = person.name,
+                text = if (showContext) person.displayName else person.name,
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.widthIn(max = 120.dp)
+                modifier = Modifier.widthIn(max = 180.dp)
             )
             Spacer(Modifier.width(4.dp))
             Icon(
@@ -432,13 +434,17 @@ fun PeoplePickerSheet(
     var query by remember { mutableStateOf("") }
     val trimmed = query.trim()
 
+    val everyone = remember(selected, known) { (selected + known).distinctBy { it.id } }
+
     val pickContact = rememberContactPicker { picked ->
-        val everyone = selected + known
-        val existing = everyone.firstOrNull { it.contactLookupKey != null && it.contactLookupKey == picked.lookupKey }
-            ?: everyone.firstOrNull { it.name.trim().equals(picked.name, ignoreCase = true) }
-                ?.copy(contactLookupKey = picked.lookupKey)
+        // The same contact is the same person. Otherwise the one person with that name who has
+        // no contact yet gets it. Anything else is someone new: namesakes are different people.
+        val sameName = everyone.filter { it.hasName(picked.name) }
+        val person = everyone.firstOrNull { it.contactLookupKey != null && it.contactLookupKey == picked.lookupKey }
+            ?: sameName.singleOrNull()?.takeIf { it.contactLookupKey == null }?.copy(contactLookupKey = picked.lookupKey)
+            ?: JournalPerson(name = picked.name, contactLookupKey = picked.lookupKey)
         haptics.performHapticFeedback(HapticFeedbackType.Confirm)
-        onAdd(existing ?: JournalPerson(name = picked.name, contactLookupKey = picked.lookupKey))
+        onAdd(person)
     }
 
     fun matches(p: JournalPerson) = trimmed.isEmpty() ||
@@ -447,17 +453,33 @@ fun PeoplePickerSheet(
 
     val inEntry = remember(selected, trimmed) { selected.filter(::matches) }
     val recent = remember(known, selected, trimmed) {
-        known.filter { k -> selected.none { it.isSamePerson(k) } }.filter(::matches).take(30)
+        known.filter { k -> selected.none { it.isSamePerson(k) } }.filter(::matches)
+            .sortedBy { trimmed.isNotEmpty() && !it.name.trim().startsWith(trimmed, ignoreCase = true) }
+            .take(30)
     }
-    val exactExists = trimmed.isNotEmpty() &&
-            (known + selected).any { it.name.equals(trimmed, ignoreCase = true) }
+    val namesakes = remember(everyone, trimmed) { if (trimmed.isEmpty()) emptyList() else everyone.filter { it.hasName(trimmed) } }
 
+    fun addNew() {
+        if (trimmed.isEmpty()) return
+        val person = JournalPerson(name = trimmed)
+        haptics.performHapticFeedback(HapticFeedbackType.Confirm)
+        onAdd(person)
+        query = ""
+        // a second Bart needs something to tell them apart: go straight to their details
+        if (namesakes.isNotEmpty()) onPersonClick(person)
+    }
+
+    /** Done on the keyboard: the person with that name when there is one to add, else someone new. */
     fun addTyped() {
         if (trimmed.isEmpty()) return
-        val match = known.firstOrNull { it.name.equals(trimmed, ignoreCase = true) }
-        haptics.performHapticFeedback(HapticFeedbackType.Confirm)
-        onAdd(match ?: JournalPerson(name = trimmed))
-        query = ""
+        val existing = namesakes.firstOrNull { n -> selected.none { it.isSamePerson(n) } }
+        if (existing != null) {
+            haptics.performHapticFeedback(HapticFeedbackType.Confirm)
+            onAdd(existing)
+            query = ""
+        } else if (namesakes.isEmpty()) {
+            addNew()
+        }
     }
 
     ModalBottomSheet(
@@ -480,14 +502,7 @@ fun PeoplePickerSheet(
                         text = stringResource(R.string.people_sheet_title),
                         style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(top = 16.dp, bottom = 4.dp)
-                    )
-                    Text(
-                        text = stringResource(R.string.people_sheet_subtitle),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.padding(horizontal = 24.dp)
+                        modifier = Modifier.padding(top = 16.dp)
                     )
                     Spacer(Modifier.height(20.dp))
                     TextField(
@@ -536,7 +551,7 @@ fun PeoplePickerSheet(
             }
 
             // Quick actions: add what you typed, or pick from the address book.
-            val showAddTyped = trimmed.isNotEmpty() && !exactExists
+            val showAddTyped = trimmed.isNotEmpty() && namesakes.isEmpty()
             val actionCount = if (showAddTyped) 2 else 1
             if (showAddTyped) {
                 item(key = "add-typed") {
@@ -553,7 +568,7 @@ fun PeoplePickerSheet(
                                 tint = MaterialTheme.colorScheme.primary
                             )
                         },
-                        onClick = ::addTyped,
+                        onClick = ::addNew,
                         modifier = Modifier.animateItem()
                     )
                 }
@@ -561,7 +576,6 @@ fun PeoplePickerSheet(
             item(key = "contacts") {
                 JuneConnectedItem(
                     title = stringResource(R.string.people_from_contacts),
-                    subtitle = stringResource(R.string.people_contacts_desc),
                     leadingContent = {
                         Box(
                             Modifier
@@ -607,7 +621,7 @@ fun PeoplePickerSheet(
                     PersonListRow(
                         person = person,
                         title = person.name,
-                        subtitle = personSubtitle(person),
+                        subtitle = person.note,
                         index = index,
                         count = inEntry.size,
                         selected = true,
@@ -639,30 +653,17 @@ fun PeoplePickerSheet(
                 }
             }
 
-            item(key = "recent-label") {
-                SheetSectionLabel(stringResource(R.string.people_recent), modifier = Modifier.animateItem())
-            }
-
-            if (recent.isEmpty()) {
-                item(key = "recent-empty") {
-                    Text(
-                        text = if (trimmed.isNotEmpty()) stringResource(R.string.people_no_match, trimmed)
-                        else stringResource(R.string.people_empty_recent),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 4.dp)
-                            .animateItem()
-                    )
+            if (recent.isNotEmpty()) {
+                item(key = "recent-label") {
+                    SheetSectionLabel(stringResource(R.string.people_recent), modifier = Modifier.animateItem())
                 }
             }
 
-            itemsIndexed(recent, key = { _, p -> "recent-" + p.identityKey }) { index, person ->
+            itemsIndexed(recent, key = { _, p -> "recent-" + p.id }) { index, person ->
                 PersonListRow(
                     person = person,
                     title = person.name,
-                    subtitle = personSubtitle(person),
+                    subtitle = person.note,
                     index = index,
                     count = recent.size,
                     linked = person.contactLookupKey != null,
@@ -683,14 +684,33 @@ fun PeoplePickerSheet(
                         .animateItem()
                 )
             }
+
+            // Someone with this name exists already, and this is not them: another Bart.
+            if (namesakes.isNotEmpty()) {
+                item(key = "add-another") {
+                    PersonListRow(
+                        person = JournalPerson(id = "preview", name = trimmed),
+                        title = stringResource(R.string.people_add_another, trimmed),
+                        subtitle = stringResource(R.string.people_add_another_desc),
+                        index = 0,
+                        count = 1,
+                        trailing = {
+                            Icon(
+                                painterResource(R.drawable.add_circle_24px),
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        },
+                        onClick = ::addNew,
+                        modifier = Modifier
+                            .padding(top = 16.dp)
+                            .animateItem()
+                    )
+                }
+            }
         }
     }
 }
-
-@Composable
-private fun personSubtitle(person: JournalPerson): String? =
-    person.note?.takeIf { it.isNotBlank() }
-        ?: if (person.contactLookupKey != null) stringResource(R.string.people_from_contacts_label) else null
 
 @Composable
 private fun SheetSectionLabel(text: String, modifier: Modifier = Modifier, trailing: String? = null) {
@@ -789,6 +809,8 @@ fun PersonDetailSheet(
     onDismiss: () -> Unit,
     /** What the destructive button says: leaving this entry, or leaving every entry. */
     removeLabel: String = stringResource(R.string.people_remove),
+    /** Everyone else, to notice when the name is shared and context is needed to tell them apart. */
+    everyone: List<JournalPerson> = emptyList(),
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -807,6 +829,7 @@ fun PersonDetailSheet(
         lookupKey = picked.lookupKey
         if (name.isBlank()) name = picked.name
     }
+    val hasNamesake = everyone.any { it.id != person.id && it.hasName(draft.name) }
 
     fun close(save: Boolean) {
         scope.launch { sheetState.hide() }.invokeOnCompletion {
@@ -855,13 +878,6 @@ fun PersonDetailSheet(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            Text(
-                stringResource(R.string.people_everywhere_hint),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.padding(top = 6.dp, start = 24.dp, end = 24.dp)
-            )
             Spacer(Modifier.height(20.dp))
 
             val fieldColors = TextFieldDefaults.colors(
@@ -886,6 +902,9 @@ fun PersonDetailSheet(
                 onValueChange = { note = it.take(80) },
                 label = { Text(stringResource(R.string.people_note)) },
                 placeholder = { Text(stringResource(R.string.people_note_placeholder)) },
+                supportingText = if (hasNamesake && note.isBlank()) {
+                    { Text(stringResource(R.string.people_namesake_hint, draft.name)) }
+                } else null,
                 singleLine = true,
                 shape = RoundedCornerShape(20.dp),
                 colors = fieldColors,
@@ -956,7 +975,6 @@ fun PersonDetailSheet(
 private fun ContactLinkRow(linked: Boolean, onClick: () -> Unit, onUnlink: () -> Unit) {
     JuneConnectedItem(
         title = stringResource(if (linked) R.string.people_linked_contact else R.string.people_link_contact),
-        subtitle = stringResource(if (linked) R.string.people_linked_contact_desc else R.string.people_link_contact_desc),
         leadingContent = {
             Icon(
                 painterResource(if (linked) R.drawable.person_24px_fill else R.drawable.person_24px),

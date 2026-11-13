@@ -42,8 +42,8 @@ class LocalAiVM(
     val settings: StateFlow<LocalAiSettings> = prefs.settings
 
     val people: StateFlow<List<String>> =
-        combine(journalRepo.getUniqueTags(), journalRepo.getKnownPeople()) { tags, people ->
-            DictationPrompt.knownPeople(tags, people.map { it.name })
+        journalRepo.getKnownPeople().map { people ->
+            people.map { it.name.trim() }.filter { it.isNotEmpty() }.distinctBy { it.lowercase() }.sortedBy { it.lowercase() }
         }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 

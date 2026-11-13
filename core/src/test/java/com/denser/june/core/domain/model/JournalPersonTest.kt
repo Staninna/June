@@ -27,27 +27,31 @@ class JournalPersonTest {
     }
 
     @Test
-    fun `a person is recognised by name whatever the case or contact link`() {
-        assertTrue(JournalPerson(name = "Tom").isSamePerson(JournalPerson(name = " tom ")))
-        assertTrue(JournalPerson(name = "Tom").isSamePerson(JournalPerson(name = "Tom", contactLookupKey = "x")))
-        assertFalse(JournalPerson(name = "Tom").isSamePerson(JournalPerson(name = "Tim")))
+    fun `a person is their id, so namesakes are different people`() {
+        val brother = JournalPerson(id = "1", name = "Bart", note = "Brother")
+        val colleague = JournalPerson(id = "2", name = "Bart", note = "Work")
+        assertFalse(brother.isSamePerson(colleague))
+        assertTrue(brother.isSamePerson(brother.copy(name = "Bartholomew")))
+        assertEquals(listOf(brother, colleague), listOf(brother, colleague, brother.copy(note = "x")).distinctPeople())
+        assertEquals(setOf("bart"), listOf(brother, colleague, JournalPerson(name = "Emma")).sharedNames())
     }
 
     @Test
-    fun `a person is labelled with an at sign`() {
-        assertEquals("@Anna van Dijk", JournalPerson(name = " Anna van Dijk ").label)
-        assertEquals("Anna van Dijk", JournalPerson.nameFromLabel("@Anna van Dijk"))
+    fun `a person is written with an at sign and filed under their id`() {
+        val anna = JournalPerson(id = "a1", name = " Anna van Dijk ", note = "Sister")
+        assertEquals("@Anna van Dijk", anna.label)
+        assertEquals("@a1", anna.key)
+        assertEquals("Anna van Dijk · Sister", anna.displayName)
+        assertEquals("[@Anna van Dijk](person:a1)", anna.mentionCode())
     }
 
     @Test
     fun `adding someone who is already there only brings a new contact link`() {
         val tom = JournalPerson(id = "t", name = "Tom", note = "Friend")
-        assertEquals(listOf(tom), listOf(tom).withPerson(JournalPerson(name = "tom")))
-        assertEquals(
-            listOf(tom.copy(contactLookupKey = "key")),
-            listOf(tom).withPerson(JournalPerson(name = "Tom", contactLookupKey = "key"))
-        )
-        assertEquals(2, listOf(tom).withPerson(JournalPerson(name = "Anna")).size)
+        assertEquals(listOf(tom), listOf(tom).withPerson(tom.copy(note = null)))
+        assertEquals(listOf(tom.copy(contactLookupKey = "key")), listOf(tom).withPerson(tom.copy(contactLookupKey = "key")))
+        // another Tom is another person
+        assertEquals(2, listOf(tom).withPerson(JournalPerson(id = "t2", name = "Tom")).size)
     }
 
     @Test
@@ -55,7 +59,7 @@ class JournalPersonTest {
         val unified = unifyPeople(listOf("work", "@Anna", "#idea", "@"), emptyList())
         assertEquals(listOf("work", "#idea"), unified.tags)
         assertEquals(listOf("Anna"), unified.people.map { it.name })
-        assertEquals(listOf("work", "#idea", "@Anna"), unified.all)
+        assertTrue(unified.people.single().isUnresolved)
     }
 
     @Test
@@ -67,44 +71,36 @@ class JournalPersonTest {
     }
 
     @Test
-    fun `a people tag picks up the known person with note and contact`() {
-        val known = JournalPerson(id = "k", name = "Anna", note = "Sister", contactLookupKey = "key")
-        val unified = unifyPeople(listOf("@anna"), emptyList(), known = listOf(known))
-        assertEquals(listOf(known), unified.people)
+    fun `a people tag is the most recent known person with that name`() {
+        val recent = JournalPerson(id = "k", name = "Anna", note = "Sister", contactLookupKey = "key")
+        val older = JournalPerson(id = "o", name = "Anna")
+        assertEquals(listOf(recent), unifyPeople(listOf("@anna"), emptyList(), known = listOf(recent, older)).people)
+    }
+
+    @Test
+    fun `someone known by name is the person with that name or one new person`() {
+        val known = listOf(JournalPerson(id = "k", name = "Anna", note = "Sister"))
+        val assigned = mutableMapOf<String, JournalPerson>()
+        val first = listOf(JournalPerson.named("anna"), JournalPerson.named("Tom")).resolvePeople(known, assigned)
+        val second = listOf(JournalPerson.named("tom")).resolvePeople(known, assigned)
+        assertEquals(known.single(), first[0])
+        assertFalse(first[1].isUnresolved)
+        // the same name in a later entry of the same import is the same new person
+        assertEquals(first[1], second.single())
     }
 
     @Test
     fun `unifying an entry without people tags changes nothing`() {
         val entry = journal.copy(tags = listOf("work"), people = listOf(JournalPerson(id = "p", name = "Tom")))
         assertTrue(entry === entry.withUnifiedPeople())
-        assertEquals(listOf("work", "@Tom"), entry.labels)
+        assertEquals(listOf("work", "@p"), entry.labelKeys)
     }
 
     @Test
-    fun `relabel renames a person and keeps their details`() {
-        val anna = JournalPerson(id = "p", name = "Anna", note = "Sister")
-        val result = relabel(listOf("work"), listOf(anna), "@Anna", "@Anna V")
-        assertEquals(listOf(anna.copy(name = "Anna V")), result.people)
-        assertEquals(listOf("work"), result.tags)
-    }
-
-    @Test
-    fun `relabel merges into a person who is already there`() {
-        val anna = JournalPerson(id = "a", name = "Anna")
-        val ann = JournalPerson(id = "b", name = "Ann")
-        val result = relabel(emptyList(), listOf(anna, ann), "@Ann", "@Anna")
-        assertEquals(listOf(anna), result.people)
-    }
-
-    @Test
-    fun `relabel can turn a person into a topic and a tag into a person`() {
-        val toTopic = relabel(emptyList(), listOf(JournalPerson(name = "Anna")), "@Anna", "#anna")
-        assertEquals(listOf("#anna"), toTopic.tags)
-        assertTrue(toTopic.people.isEmpty())
-
-        val toPerson = relabel(listOf("Anna", "work"), emptyList(), "Anna", "@Anna")
-        assertEquals(listOf("work"), toPerson.tags)
-        assertEquals(listOf("Anna"), toPerson.people.map { it.name })
+    fun `mentions follow a rename, but only those of that person`() {
+        val bart = JournalPerson(id = "b1", name = "Bartholomew")
+        val text = "With [@Bart](person:b1) and [@Bart](person:b2)."
+        assertEquals("With [@Bartholomew](person:b1) and [@Bart](person:b2).", renameMentions(text, bart))
     }
 
     @Test
@@ -118,7 +114,7 @@ class JournalPersonTest {
     @Test
     fun `distinctPeople keeps first occurrence`() {
         val first = JournalPerson(id = "1", name = "Tom", note = "newest")
-        val second = JournalPerson(id = "2", name = "tom", note = "older")
+        val second = JournalPerson(id = "1", name = "tom", note = "older")
         assertEquals(listOf(first), listOf(first, second).distinctPeople())
     }
 

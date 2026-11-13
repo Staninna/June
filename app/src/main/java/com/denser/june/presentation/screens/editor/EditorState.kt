@@ -23,8 +23,8 @@ data class EditorState(
     val tagSuggestions: List<String> = emptyList(),
     val people: List<com.denser.june.core.domain.model.JournalPerson> = emptyList(),
     val knownPeople: List<com.denser.june.core.domain.model.JournalPerson> = emptyList(),
-    /** True while a new entry started from a person label still waits for that person's details. */
-    val hydratePeople: Boolean = false,
+    /** People a new entry was started with (`@<id>` or `@name`), until the journal's people are loaded. */
+    val pendingPeople: List<String> = emptyList(),
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long? = null,
     val dateTime: Long = getTodayAtMidnight(),
@@ -61,8 +61,8 @@ data class EditorState(
     val initialTheme: JournalTheme? = null
 ) {
     val isDeleted: Boolean get() = deletedAt != null
-    /** Everything the entry is filed under: tags plus each person as `@Name`. */
-    val labels: List<String> get() = tags + people.map { it.label }
+    /** How many labels the entry has: spaces, topics and people. */
+    val labelCount: Int get() = tags.size + people.size
     val isFontDirty: Boolean
         get() = font != initialFont || fontVariation != initialFontVariation
     val isThemeDirty: Boolean

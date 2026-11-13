@@ -149,64 +149,71 @@ class JournalTagRepositoryTest {
         Journal(id = id, title = "t", content = "c", tags = tags, people = people, createdAt = 1L, updatedAt = 1L, dateTime = 1L)
 
     @Test
-    fun insertJournal_movesPeopleTagsToPeopleAndIndexesThemAsLabels() = runTest {
+    fun insertJournal_movesPeopleTagsToPeopleAndFilesThemUnderTheirId() = runTest {
         repository.insertJournal(journal("j1", tags = listOf("work", "@Anna")))
 
         val stored = fakeDao.journals["j1"]!!
         assertEquals(listOf("work"), stored.tags)
-        assertEquals(listOf("Anna"), stored.people.map { it.name })
-        assertEquals(setOf("work", "@Anna"), fakeDao.crossRefs.filter { it.id == "j1" }.map { it.tagName }.toSet())
+        val anna = stored.people.single()
+        assertEquals("Anna", anna.name)
+        assertFalse(anna.isUnresolved)
+        assertEquals(setOf("work", "@${anna.id}"), fakeDao.crossRefs.filter { it.id == "j1" }.map { it.tagName }.toSet())
     }
 
     @Test
-    fun updateJournal_indexesPeopleWithSpacesInTheirName() = runTest {
+    fun updateJournal_keepsNamesakesApart() = runTest {
+        val brother = JournalPerson(id = "b1", name = "Bart", note = "Brother")
+        val colleague = JournalPerson(id = "b2", name = "Bart", note = "Work")
         repository.insertJournal(journal("j1"))
-        repository.updateJournal(journal("j1", people = listOf(JournalPerson(name = "Anna van Dijk"))))
+        repository.updateJournal(journal("j1", people = listOf(brother, colleague)))
 
-        assertEquals(listOf("@Anna van Dijk"), fakeDao.crossRefs.filter { it.id == "j1" }.map { it.tagName })
+        assertEquals(listOf(brother, colleague), fakeDao.journals["j1"]!!.people)
+        assertEquals(setOf("@b1", "@b2"), fakeDao.crossRefs.filter { it.id == "j1" }.map { it.tagName }.toSet())
     }
 
     @Test
-    fun updatePerson_changesThePersonOnEveryEntry() = runTest {
-        val anna = JournalPerson(id = "a", name = "Anna")
-        repository.insertJournal(journal("j1", people = listOf(anna)))
-        repository.insertJournal(journal("j2", people = listOf(anna.copy(id = "b"), JournalPerson(name = "Tom"))))
-        repository.insertJournal(journal("j3", people = listOf(JournalPerson(name = "Tom"))))
+    fun updatePerson_changesThatPersonOnEveryEntryAndInTheText() = runTest {
+        val bart = JournalPerson(id = "b1", name = "Bart")
+        val otherBart = JournalPerson(id = "b2", name = "Bart")
+        repository.insertJournal(journal("j1", people = listOf(bart)).copy(content = "With [@Bart](person:b1) and [@Bart](person:b2)."))
+        repository.insertJournal(journal("j2", people = listOf(bart, otherBart)))
+        repository.insertJournal(journal("j3", people = listOf(otherBart)))
 
-        repository.updatePerson(anna, anna.copy(name = "Anna V", note = "Sister", contactLookupKey = "key"))
+        val updated = bart.copy(name = "Bart V", note = "Brother", contactLookupKey = "key")
+        repository.updatePerson(updated)
 
-        listOf("j1", "j2").forEach { id ->
-            val person = fakeDao.journals[id]!!.people.first()
-            assertEquals("Anna V", person.name)
-            assertEquals("Sister", person.note)
-            assertEquals("key", person.contactLookupKey)
-        }
-        assertEquals(listOf("Tom"), fakeDao.journals["j3"]!!.people.map { it.name })
-        assertTrue(fakeDao.crossRefs.none { it.tagName == "@Anna" })
-        assertEquals(setOf("j1", "j2"), fakeDao.crossRefs.filter { it.tagName == "@Anna V" }.map { it.id }.toSet())
-        assertFalse(fakeDao.tags.contains("@Anna"))
+        assertEquals(listOf(updated), fakeDao.journals["j1"]!!.people)
+        assertEquals("With [@Bart V](person:b1) and [@Bart](person:b2).", fakeDao.journals["j1"]!!.content)
+        assertEquals(listOf(updated, otherBart), fakeDao.journals["j2"]!!.people)
+        assertEquals(listOf(otherBart), fakeDao.journals["j3"]!!.people)
+        assertEquals(setOf("j1", "j2"), fakeDao.crossRefs.filter { it.tagName == "@b1" }.map { it.id }.toSet())
     }
 
     @Test
-    fun renameTag_renamesAPerson() = runTest {
-        repository.insertJournal(journal("j1", people = listOf(JournalPerson(name = "Anna", note = "Sister"))))
+    fun removePerson_takesOnlyThatPersonOffEveryEntry() = runTest {
+        val bart = JournalPerson(id = "b1", name = "Bart")
+        val otherBart = JournalPerson(id = "b2", name = "Bart")
+        repository.insertJournal(journal("j1", tags = listOf("work"), people = listOf(bart, otherBart)))
 
-        repository.renameTag("@Anna", "@Annabel")
+        repository.removePerson("b1")
 
-        val person = fakeDao.journals["j1"]!!.people.single()
-        assertEquals("Annabel", person.name)
-        assertEquals("Sister", person.note)
-        assertEquals(listOf("@Annabel"), fakeDao.crossRefs.map { it.tagName })
+        assertEquals(listOf(otherBart), fakeDao.journals["j1"]!!.people)
+        assertEquals(setOf("work", "@b2"), fakeDao.crossRefs.map { it.tagName }.toSet())
+        assertFalse(fakeDao.tags.contains("@b1"))
     }
 
     @Test
-    fun deleteTag_removesAPersonFromEveryEntry() = runTest {
-        repository.insertJournal(journal("j1", tags = listOf("work"), people = listOf(JournalPerson(name = "Anna"))))
+    fun renameTag_toAPersonLabelMakesOnePersonOfIt() = runTest {
+        repository.insertJournal(journal("j1", tags = listOf("Anna", "work")))
+        repository.insertJournal(journal("j2", tags = listOf("Anna")))
 
-        repository.deleteTag("@Anna")
+        repository.renameTag("Anna", "@Anna")
 
-        assertTrue(fakeDao.journals["j1"]!!.people.isEmpty())
+        val anna = fakeDao.journals["j1"]!!.people.single()
+        assertEquals("Anna", anna.name)
+        assertEquals(listOf(anna), fakeDao.journals["j2"]!!.people)
         assertEquals(listOf("work"), fakeDao.journals["j1"]!!.tags)
-        assertEquals(listOf("work"), fakeDao.crossRefs.map { it.tagName })
+        assertEquals(setOf("j1", "j2"), fakeDao.crossRefs.filter { it.tagName == anna.key }.map { it.id }.toSet())
+        assertTrue(fakeDao.crossRefs.none { it.tagName == "@Anna" || it.tagName == "Anna" })
     }
 }
