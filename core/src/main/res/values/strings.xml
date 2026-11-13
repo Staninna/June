@@ -682,4 +682,7 @@
     <string name="people_contact_unavailable">Couldn’t open this contact</string>
     <string name="people_count">%1$d people</string>
     <string name="people_selected">Added</string>
+    <string name="people_contacts_desc">Pick from your address book. No contacts permission needed</string>
+    <string name="people_from_contacts_label">From your contacts</string>
+    <string name="people_add_new_desc">New person</string>
 </resources>

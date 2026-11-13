@@ -9,14 +9,12 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -29,7 +27,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -46,13 +43,11 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -74,7 +69,6 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -84,6 +78,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.denser.june.core.R
 import com.denser.june.core.domain.model.JournalPerson
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.style.TextAlign
+import com.denser.june.presentation.components.JuneConnectedItem
+import com.denser.june.presentation.components.JuneConnectedRowItem
 import kotlinx.coroutines.launch
 import kotlin.math.absoluteValue
 
@@ -231,7 +231,7 @@ fun EditorPeopleRow(
                     Surface(
                         onClick = onAddClick,
                         shape = CircleShape,
-                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
                         contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(36.dp)
                     ) {
@@ -258,7 +258,7 @@ private fun PersonChip(
     Surface(
         onClick = onClick,
         shape = RoundedCornerShape(50),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
         modifier = modifier.heightIn(min = 36.dp)
     ) {
         Row(
@@ -343,10 +343,21 @@ private fun rememberContactPicker(onPicked: (PickedContact) -> Unit): () -> Unit
 }
 
 // -------------------------------------------------------------------------------------------------
-// Add-people sheet
+// Add-people sheet (same anatomy as the editor's AddItemSheet: handle, bold title, connected rows)
 // -------------------------------------------------------------------------------------------------
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+private fun SheetHandle() {
+    Box(
+        modifier = Modifier
+            .padding(top = 24.dp)
+            .width(36.dp)
+            .height(4.dp)
+            .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f), CircleShape)
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PeoplePickerSheet(
     selected: List<JournalPerson>,
@@ -357,18 +368,23 @@ fun PeoplePickerSheet(
     onDismiss: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val haptics = LocalHapticFeedback.current
     var query by remember { mutableStateOf("") }
     val trimmed = query.trim()
 
     val pickContact = rememberContactPicker { picked ->
         val existing = known.firstOrNull { it.contactLookupKey != null && it.contactLookupKey == picked.lookupKey }
+        haptics.performHapticFeedback(HapticFeedbackType.Confirm)
         onAdd(existing ?: JournalPerson(name = picked.name, contactLookupKey = picked.lookupKey))
     }
 
+    fun matches(p: JournalPerson) = trimmed.isEmpty() ||
+            p.name.contains(trimmed, ignoreCase = true) ||
+            p.note.orEmpty().contains(trimmed, ignoreCase = true)
+
+    val inEntry = remember(selected, trimmed) { selected.filter(::matches) }
     val recent = remember(known, selected, trimmed) {
-        known.filter { k -> selected.none { it.isSamePerson(k) } }
-            .filter { trimmed.isEmpty() || it.name.contains(trimmed, ignoreCase = true) || it.note.orEmpty().contains(trimmed, ignoreCase = true) }
-            .take(30)
+        known.filter { k -> selected.none { it.isSamePerson(k) } }.filter(::matches).take(30)
     }
     val exactExists = trimmed.isNotEmpty() &&
             (known + selected).any { it.name.equals(trimmed, ignoreCase = true) }
@@ -376,6 +392,7 @@ fun PeoplePickerSheet(
     fun addTyped() {
         if (trimmed.isEmpty()) return
         val match = known.firstOrNull { it.name.equals(trimmed, ignoreCase = true) }
+        haptics.performHapticFeedback(HapticFeedbackType.Confirm)
         onAdd(match ?: JournalPerson(name = trimmed))
         query = ""
     }
@@ -384,72 +401,60 @@ fun PeoplePickerSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        dragHandle = null
     ) {
         LazyColumn(
             modifier = Modifier
                 .fillMaxWidth()
-                .imePadding()
-                .navigationBarsPadding(),
-            contentPadding = PaddingValues(bottom = 24.dp)
+                .imePadding(),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
             item(key = "header") {
-                Row(
-                    modifier = Modifier.padding(horizontal = 24.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(
-                        Modifier
-                            .size(48.dp)
-                            .clip(MaterialShapes.Cookie6Sided.toShape())
-                            .background(MaterialTheme.colorScheme.tertiaryContainer),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            painterResource(R.drawable.groups_24px_fill),
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onTertiaryContainer
-                        )
-                    }
-                    Spacer(Modifier.width(16.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            stringResource(R.string.people_sheet_title),
-                            style = MaterialTheme.typography.headlineSmall
-                        )
-                        Text(
-                            stringResource(R.string.people_sheet_subtitle),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-                Spacer(Modifier.height(20.dp))
-            }
-
-            item(key = "input") {
-                Column(Modifier.padding(horizontal = 16.dp)) {
-                    OutlinedTextField(
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    SheetHandle()
+                    Text(
+                        text = stringResource(R.string.people_sheet_title),
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(top = 16.dp, bottom = 4.dp)
+                    )
+                    Text(
+                        text = stringResource(R.string.people_sheet_subtitle),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(horizontal = 24.dp)
+                    )
+                    Spacer(Modifier.height(20.dp))
+                    TextField(
                         value = query,
                         onValueChange = { query = it.take(60) },
                         placeholder = { Text(stringResource(R.string.people_search_hint)) },
-                        leadingIcon = { Icon(painterResource(R.drawable.person_24px), null) },
+                        leadingIcon = {
+                            Icon(
+                                painterResource(R.drawable.search_24px),
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        },
                         trailingIcon = {
                             AnimatedVisibility(
                                 visible = trimmed.isNotEmpty(),
                                 enter = scaleIn() + fadeIn(),
                                 exit = scaleOut() + fadeOut()
                             ) {
-                                IconButton(onClick = ::addTyped) {
+                                IconButton(onClick = { query = "" }) {
                                     Icon(
-                                        painterResource(R.drawable.add_circle_24px_fill),
-                                        contentDescription = stringResource(R.string.people_add_name, trimmed),
-                                        tint = MaterialTheme.colorScheme.primary
+                                        painterResource(R.drawable.close_24px),
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
                             }
                         },
                         singleLine = true,
-                        shape = RoundedCornerShape(16.dp),
+                        shape = CircleShape,
                         keyboardOptions = KeyboardOptions(
                             capitalization = KeyboardCapitalization.Words,
                             imeAction = ImeAction.Done
@@ -463,60 +468,116 @@ fun PeoplePickerSheet(
                         ),
                         modifier = Modifier.fillMaxWidth()
                     )
-                    Spacer(Modifier.height(10.dp))
-                    FilledTonalButton(
-                        onClick = pickContact,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = 48.dp)
-                    ) {
-                        Icon(
-                            painterResource(R.drawable.person_24px),
-                            contentDescription = null,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(stringResource(R.string.people_from_contacts))
-                    }
+                    Spacer(Modifier.height(12.dp))
                 }
             }
 
-            if (selected.isNotEmpty()) {
-                item(key = "selected") {
-                    SheetSectionLabel(stringResource(R.string.people_in_entry))
-                    FlowRow(
-                        modifier = Modifier
-                            .padding(horizontal = 16.dp)
-                            .animateContentSize(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        selected.forEach { person ->
-                            SelectedPersonPill(
-                                person = person,
-                                onClick = { onPersonClick(person) },
-                                onRemove = { onRemove(person) }
-                            )
-                        }
-                    }
-                }
-            }
-
-            if (trimmed.isNotEmpty() && !exactExists) {
+            // Quick actions: add what you typed, or pick from the address book.
+            val showAddTyped = trimmed.isNotEmpty() && !exactExists
+            val actionCount = if (showAddTyped) 2 else 1
+            if (showAddTyped) {
                 item(key = "add-typed") {
-                    Spacer(Modifier.height(8.dp))
-                    PersonRow(
+                    PersonListRow(
                         person = JournalPerson(id = "preview", name = trimmed),
                         title = stringResource(R.string.people_add_name, trimmed),
-                        subtitle = null,
-                        trailingIcon = R.drawable.add_24px,
-                        onClick = ::addTyped
+                        subtitle = stringResource(R.string.people_add_new_desc),
+                        index = 0,
+                        count = actionCount,
+                        trailing = {
+                            Icon(
+                                painterResource(R.drawable.add_circle_24px_fill),
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        },
+                        onClick = ::addTyped,
+                        modifier = Modifier.animateItem()
+                    )
+                }
+            }
+            item(key = "contacts") {
+                JuneConnectedItem(
+                    title = stringResource(R.string.people_from_contacts),
+                    subtitle = stringResource(R.string.people_contacts_desc),
+                    leadingContent = {
+                        Box(
+                            Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.secondaryContainer),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                painterResource(R.drawable.person_24px),
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                        }
+                    },
+                    trailingContent = {
+                        Icon(
+                            painterResource(R.drawable.chevron_right_24px),
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    },
+                    index = actionCount - 1,
+                    count = actionCount,
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
+                    onClick = pickContact,
+                    modifier = Modifier
+                        .padding(top = if (showAddTyped) 4.dp else 0.dp)
+                        .animateItem()
+                )
+            }
+
+            if (inEntry.isNotEmpty()) {
+                item(key = "in-entry-label") {
+                    SheetSectionLabel(
+                        stringResource(R.string.people_in_entry),
+                        trailing = "${selected.size}",
+                        modifier = Modifier.animateItem()
+                    )
+                }
+                itemsIndexed(inEntry, key = { _, p -> "in-" + p.id }) { index, person ->
+                    PersonListRow(
+                        person = person,
+                        title = person.name,
+                        subtitle = personSubtitle(person),
+                        index = index,
+                        count = inEntry.size,
+                        selected = true,
+                        linked = person.contactLookupKey != null,
+                        trailing = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                IconButton(onClick = { onPersonClick(person) }) {
+                                    Icon(
+                                        painterResource(R.drawable.edit_24px),
+                                        contentDescription = stringResource(R.string.people_edit),
+                                        tint = MaterialTheme.colorScheme.onSecondaryContainer
+                                    )
+                                }
+                                Icon(
+                                    painterResource(R.drawable.check_circle_24px_fill),
+                                    contentDescription = stringResource(R.string.people_selected),
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        },
+                        onClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.ToggleOff)
+                            onRemove(person)
+                        },
+                        modifier = Modifier
+                            .padding(bottom = if (index == inEntry.lastIndex) 0.dp else 4.dp)
+                            .animateItem()
                     )
                 }
             }
 
             item(key = "recent-label") {
-                SheetSectionLabel(stringResource(R.string.people_recent))
+                SheetSectionLabel(stringResource(R.string.people_recent), modifier = Modifier.animateItem())
             }
 
             if (recent.isEmpty()) {
@@ -526,23 +587,37 @@ fun PeoplePickerSheet(
                         else stringResource(R.string.people_empty_recent),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp)
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 4.dp)
+                            .animateItem()
                     )
                 }
             }
 
-            items(recent, key = { "recent-" + it.identityKey }) { person ->
-                PersonRow(
+            itemsIndexed(recent, key = { _, p -> "recent-" + p.identityKey }) { index, person ->
+                PersonListRow(
                     person = person,
                     title = person.name,
-                    subtitle = person.note,
+                    subtitle = personSubtitle(person),
+                    index = index,
+                    count = recent.size,
                     linked = person.contactLookupKey != null,
-                    trailingIcon = R.drawable.add_24px,
+                    trailing = {
+                        Icon(
+                            painterResource(R.drawable.add_circle_24px),
+                            contentDescription = stringResource(R.string.people_add),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    },
                     onClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.ToggleOn)
                         onAdd(person)
                         query = ""
                     },
-                    modifier = Modifier.animateItem()
+                    modifier = Modifier
+                        .padding(bottom = if (index == recent.lastIndex) 0.dp else 4.dp)
+                        .animateItem()
                 )
             }
         }
@@ -550,79 +625,66 @@ fun PeoplePickerSheet(
 }
 
 @Composable
-private fun SheetSectionLabel(text: String) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.labelLarge,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(start = 24.dp, end = 24.dp, top = 20.dp, bottom = 8.dp)
-    )
-}
+private fun personSubtitle(person: JournalPerson): String? =
+    person.note?.takeIf { it.isNotBlank() }
+        ?: if (person.contactLookupKey != null) stringResource(R.string.people_from_contacts_label) else null
 
 @Composable
-private fun SelectedPersonPill(
-    person: JournalPerson,
-    onClick: () -> Unit,
-    onRemove: () -> Unit,
-) {
-    Surface(
-        shape = RoundedCornerShape(50),
-        color = MaterialTheme.colorScheme.secondaryContainer,
-        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+private fun SheetSectionLabel(text: String, modifier: Modifier = Modifier, trailing: String? = null) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(start = 12.dp, end = 12.dp, top = 24.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(50))
-                    .clickable(role = Role.Button, onClick = onClick)
-                    .padding(start = 4.dp, top = 4.dp, bottom = 4.dp, end = 4.dp)
-            ) {
-                PersonAvatar(person, size = 28.dp)
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    person.name,
-                    style = MaterialTheme.typography.labelLarge,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.widthIn(max = 160.dp)
-                )
-            }
-            IconButton(onClick = onRemove, modifier = Modifier.size(36.dp)) {
-                Icon(
-                    painterResource(R.drawable.close_24px),
-                    contentDescription = stringResource(R.string.people_remove),
-                    modifier = Modifier.size(16.dp)
-                )
-            }
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.weight(1f)
+        )
+        if (trailing != null) {
+            Text(
+                text = trailing,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
 
 @Composable
-private fun PersonRow(
+private fun PersonListRow(
     person: JournalPerson,
     title: String,
     subtitle: String?,
-    trailingIcon: Int,
+    index: Int,
+    count: Int,
     onClick: () -> Unit,
+    trailing: @Composable () -> Unit,
     modifier: Modifier = Modifier,
+    selected: Boolean = false,
     linked: Boolean = false,
 ) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
+    JuneConnectedRowItem(
+        leadingContent = { PersonAvatar(person, size = 40.dp) },
+        trailingContent = trailing,
+        index = index,
+        count = count,
+        selected = selected,
+        containerColor = if (selected) MaterialTheme.colorScheme.secondaryContainer
+        else MaterialTheme.colorScheme.surfaceContainerHigh,
+        contentPadding = PaddingValues(start = 16.dp, end = 12.dp, top = 12.dp, bottom = 12.dp),
+        onClick = onClick,
         modifier = modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 24.dp, vertical = 10.dp)
     ) {
-        PersonAvatar(person, size = 44.dp)
-        Spacer(Modifier.width(16.dp))
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     title,
                     style = MaterialTheme.typography.titleMedium,
+                    color = if (selected) MaterialTheme.colorScheme.onSecondaryContainer
+                    else MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false)
@@ -641,17 +703,13 @@ private fun PersonRow(
                 Text(
                     subtitle,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (selected) MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f)
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
             }
         }
-        Icon(
-            painterResource(trailingIcon),
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant
-        )
     }
 }
 
@@ -704,21 +762,24 @@ fun PersonDetailSheet(
         onDismissRequest = { if (draft != person) onSave(draft); onDismiss() },
         sheetState = sheetState,
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        dragHandle = null
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .imePadding()
-                .navigationBarsPadding()
-                .padding(horizontal = 24.dp)
-                .padding(bottom = 16.dp),
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            SheetHandle()
+            Spacer(Modifier.height(20.dp))
             PersonAvatar(draft, size = 88.dp)
             Spacer(Modifier.height(12.dp))
             Text(
                 draft.name,
                 style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -742,7 +803,7 @@ fun PersonDetailSheet(
                 onValueChange = { name = it.take(60) },
                 label = { Text(stringResource(R.string.people_name)) },
                 singleLine = true,
-                shape = RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(20.dp),
                 colors = fieldColors,
                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words),
                 modifier = Modifier.fillMaxWidth()
@@ -754,7 +815,7 @@ fun PersonDetailSheet(
                 label = { Text(stringResource(R.string.people_note)) },
                 placeholder = { Text(stringResource(R.string.people_note_placeholder)) },
                 singleLine = true,
-                shape = RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(20.dp),
                 colors = fieldColors,
                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
                 modifier = Modifier.fillMaxWidth()
@@ -762,7 +823,9 @@ fun PersonDetailSheet(
             Spacer(Modifier.height(8.dp))
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp)
             ) {
                 quickNotes.forEach { q ->
                     FilterChip(
@@ -775,8 +838,6 @@ fun PersonDetailSheet(
             }
 
             Spacer(Modifier.height(16.dp))
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-            Spacer(Modifier.height(8.dp))
 
             val linked = lookupKey
             ContactLinkRow(
@@ -821,44 +882,31 @@ fun PersonDetailSheet(
 
 @Composable
 private fun ContactLinkRow(linked: Boolean, onClick: () -> Unit, onUnlink: () -> Unit) {
-    Surface(
-        onClick = onClick,
-        shape = RoundedCornerShape(20.dp),
-        color = if (linked) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
-        else MaterialTheme.colorScheme.surfaceContainerHigh,
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = 12.dp)
-        ) {
+    JuneConnectedItem(
+        title = stringResource(if (linked) R.string.people_linked_contact else R.string.people_link_contact),
+        subtitle = stringResource(if (linked) R.string.people_linked_contact_desc else R.string.people_link_contact_desc),
+        leadingContent = {
             Icon(
                 painterResource(if (linked) R.drawable.person_24px_fill else R.drawable.person_24px),
                 contentDescription = null,
-                tint = if (linked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                tint = if (linked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary
             )
-            Spacer(Modifier.width(16.dp))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    stringResource(if (linked) R.string.people_linked_contact else R.string.people_link_contact),
-                    style = MaterialTheme.typography.titleSmall
-                )
-                Text(
-                    stringResource(if (linked) R.string.people_linked_contact_desc else R.string.people_link_contact_desc),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
+        },
+        trailingContent = {
             if (linked) {
                 TextButton(onClick = onUnlink) { Text(stringResource(R.string.people_unlink)) }
             } else {
                 Icon(
                     painterResource(R.drawable.chevron_right_24px),
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(end = 8.dp)
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-        }
-    }
+        },
+        shape = RoundedCornerShape(28.dp),
+        containerColor = if (linked) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
+        else MaterialTheme.colorScheme.surfaceContainerHigh,
+        contentPadding = PaddingValues(start = 20.dp, end = 12.dp, top = 14.dp, bottom = 14.dp),
+        onClick = onClick
+    )
 }
