@@ -128,7 +128,8 @@ class EditorVM(
             return
         }
         cleanupJob?.cancel()
-        _cleanup.value = CleanupUiState.Working
+        val working = CleanupUiState.Working()
+        _cleanup.value = working
         cleanupJob =
             viewModelScope.launch {
                 val people = DictationPrompt.knownPeople(
@@ -136,7 +137,13 @@ class EditorVM(
                     journalRepo.getKnownPeople().first().map { it.name } + _state.value.people.map { it.name }
                 )
                 _cleanup.value =
-                    when (val outcome = dictationCleanup.run(body, people)) {
+                    when (
+                        val outcome =
+                            dictationCleanup.run(body, people) { progress ->
+                                // only while this run is still the one on screen
+                                _cleanup.update { if (it is CleanupUiState.Working) working.copy(progress = progress) else it }
+                            }
+                    ) {
                         is DictationCleanup.Outcome.Rewrite ->
                             CleanupUiState.Review(
                                 original = outcome.original,
@@ -150,6 +157,7 @@ class EditorVM(
                         DictationCleanup.Outcome.Busy -> CleanupUiState.Problem(CleanupUiState.Kind.Busy)
                         DictationCleanup.Outcome.TooLong -> CleanupUiState.Problem(CleanupUiState.Kind.TooLong)
                         DictationCleanup.Outcome.EmptyResult -> CleanupUiState.Problem(CleanupUiState.Kind.Empty)
+                        DictationCleanup.Outcome.Stopped -> CleanupUiState.Problem(CleanupUiState.Kind.Stopped)
                         is DictationCleanup.Outcome.Error -> CleanupUiState.Problem(CleanupUiState.Kind.Error, outcome.message)
                     }
             }

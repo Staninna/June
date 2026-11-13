@@ -14,6 +14,9 @@ data class LocalAiSettings(
     val serverPackage: String = LocalAiContract.SERVER_PACKAGE,
     /** null = use [DictationPrompt.DEFAULT_SYSTEM_PROMPT]. */
     val customSystemPrompt: String? = null,
+    /** A background job that was still running when June last looked, and what it was for. */
+    val pendingJobId: String? = null,
+    val pendingJobFingerprint: String? = null,
 ) {
     val isPaired: Boolean
         get() = !token.isNullOrBlank() && baseUrl != null
@@ -22,16 +25,24 @@ data class LocalAiSettings(
         get() = customSystemPrompt ?: DictationPrompt.DEFAULT_SYSTEM_PROMPT
 }
 
+/** The part of the Local AI settings a cleanup run reads and writes. */
+interface LocalAiStore {
+    val current: LocalAiSettings
+
+    /** Remembers a running job so the same cleanup can pick it up again, even after June was killed. */
+    fun setPendingJob(id: String?, fingerprint: String?)
+}
+
 /**
  * Stored in its own SharedPreferences file ("local_ai"), which is excluded from backups so the
  * pairing token never leaves the device.
  */
-class LocalAiPreferences(context: Context) {
+class LocalAiPreferences(context: Context) : LocalAiStore {
     private val prefs = context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
     private val _settings = MutableStateFlow(read())
     val settings: StateFlow<LocalAiSettings> = _settings.asStateFlow()
 
-    val current: LocalAiSettings
+    override val current: LocalAiSettings
         get() = _settings.value
 
     fun setEnabled(enabled: Boolean) = update { it.copy(enabled = enabled) }
@@ -39,7 +50,10 @@ class LocalAiPreferences(context: Context) {
     fun savePairing(token: String, baseUrl: String, serverPackage: String) =
         update { it.copy(token = token, baseUrl = baseUrl.trimEnd('/'), serverPackage = serverPackage) }
 
-    fun clearPairing() = update { it.copy(token = null, baseUrl = null) }
+    fun clearPairing() = update { it.copy(token = null, baseUrl = null, pendingJobId = null, pendingJobFingerprint = null) }
+
+    override fun setPendingJob(id: String?, fingerprint: String?) =
+        update { it.copy(pendingJobId = id, pendingJobFingerprint = fingerprint.takeIf { id != null }) }
 
     /** Saving the default text (or blank) stores null, so future prompt updates still apply. */
     fun setSystemPrompt(prompt: String) =
@@ -58,6 +72,8 @@ class LocalAiPreferences(context: Context) {
             putString(KEY_BASE_URL, next.baseUrl)
             putString(KEY_SERVER_PACKAGE, next.serverPackage)
             putString(KEY_PROMPT, next.customSystemPrompt)
+            putString(KEY_PENDING_JOB, next.pendingJobId)
+            putString(KEY_PENDING_FINGERPRINT, next.pendingJobFingerprint)
         }
         _settings.value = next
     }
@@ -69,6 +85,8 @@ class LocalAiPreferences(context: Context) {
             baseUrl = prefs.getString(KEY_BASE_URL, null),
             serverPackage = prefs.getString(KEY_SERVER_PACKAGE, null) ?: LocalAiContract.SERVER_PACKAGE,
             customSystemPrompt = prefs.getString(KEY_PROMPT, null),
+            pendingJobId = prefs.getString(KEY_PENDING_JOB, null),
+            pendingJobFingerprint = prefs.getString(KEY_PENDING_FINGERPRINT, null),
         )
 
     companion object {
@@ -78,5 +96,7 @@ class LocalAiPreferences(context: Context) {
         private const val KEY_BASE_URL = "base_url"
         private const val KEY_SERVER_PACKAGE = "server_package"
         private const val KEY_PROMPT = "system_prompt"
+        private const val KEY_PENDING_JOB = "pending_job_id"
+        private const val KEY_PENDING_FINGERPRINT = "pending_job_fingerprint"
     }
 }

@@ -6,11 +6,11 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 
 /**
- * Client side of docs/LOCAL_LLM_API.md (contract v1). The server is the SmolChat fork
+ * Client side of docs/LOCAL_LLM_API.md (contract v2). The server is the SmolChat fork
  * ("SmolChat Server"); keep this file in sync with the contract in both repositories.
  */
 object LocalAiContract {
-    const val API_VERSION = 1
+    const val API_VERSION = 2
     const val SERVER_PACKAGE = "io.shubham0204.smollmandroid"
     const val ACTION_PAIR = "$SERVER_PACKAGE.action.PAIR"
     const val EXTRA_CLIENT_NAME = "client_name"
@@ -44,6 +44,8 @@ data class LocalAiChatRequest(
     @SerialName("max_tokens") val maxTokens: Int? = null,
     val stream: Boolean = false,
     @SerialName("chat_template_kwargs") val chatTemplateKwargs: Map<String, JsonElement>? = null,
+    /** v2: answer `202` with a job and keep generating without this connection (§2.4). */
+    val background: Boolean = false,
 )
 
 @Serializable
@@ -70,6 +72,43 @@ data class LocalAiChatResponse(
     val choices: List<LocalAiChoice> = emptyList(),
     val usage: LocalAiUsage? = null,
 )
+
+@Serializable
+data class LocalAiJobProgress(
+    @SerialName("prompt_tokens") val promptTokens: Int = 0,
+    @SerialName("prompt_tokens_processed") val promptTokensProcessed: Int = 0,
+    @SerialName("prompt_tokens_cached") val promptTokensCached: Int = 0,
+    @SerialName("completion_tokens") val completionTokens: Int = 0,
+    @SerialName("max_tokens") val maxTokens: Int? = null,
+    @SerialName("tokens_per_second") val tokensPerSecond: Double? = null,
+    @SerialName("elapsed_ms") val elapsedMs: Long = 0,
+)
+
+/** A background generation (§2.4). [response] is set once [status] is `completed`. */
+@Serializable
+data class LocalAiJob(
+    val id: String,
+    @SerialName("object") val obj: String = OBJECT,
+    val status: String = STATUS_QUEUED,
+    @SerialName("queue_position") val queuePosition: Int? = null,
+    val progress: LocalAiJobProgress = LocalAiJobProgress(),
+    val response: LocalAiChatResponse? = null,
+    val error: LocalAiErrorBody? = null,
+) {
+    val isFinished: Boolean
+        get() = status == STATUS_COMPLETED || status == STATUS_FAILED || status == STATUS_CANCELLED
+
+    companion object {
+        const val OBJECT = "chat.completion.job"
+        const val STATUS_QUEUED = "queued"
+        const val STATUS_LOADING_MODEL = "loading_model"
+        const val STATUS_PROCESSING_PROMPT = "processing_prompt"
+        const val STATUS_GENERATING = "generating"
+        const val STATUS_COMPLETED = "completed"
+        const val STATUS_FAILED = "failed"
+        const val STATUS_CANCELLED = "cancelled"
+    }
+}
 
 @Serializable
 data class LocalAiHealth(
