@@ -201,6 +201,9 @@ class EditorVM(
 
     fun retryCleanup() = runCleanup()
 
+    /** Answers who a name several people share means in the rewrite. Null: nobody's mention. */
+    fun pickCleanupPerson(key: String, personId: String?) = cleanupSession.pick(key, personId)
+
     fun cancelCleanup() = cleanupSession.cancel()
 
     /** Puts the sheet away. The run carries on and shows on the sparkle button. */
@@ -226,10 +229,11 @@ class EditorVM(
         // text added while the cleanup ran is not in the rewrite: it stays, after it
         val edits = editedDuringCleanup()
         contentBeforeCleanup = currentMarkdown()
-        replaceBody(if (edits is EditedMeanwhile.Added) edits.keep(review.rewrite) else review.rewrite)
+        val rewrite = review.settled
+        replaceBody(if (edits is EditedMeanwhile.Added) edits.keep(rewrite) else rewrite)
         // people the rewrite names are on the entry now
         val known = _state.value.knownPeople
-        val named = MENTIONED_PERSON.findAll(review.rewrite).mapNotNull { m -> known.firstOrNull { it.id == m.groupValues[1] } }.toList()
+        val named = MENTIONED_PERSON.findAll(rewrite).mapNotNull { m -> known.firstOrNull { it.id == m.groupValues[1] } }.toList()
         if (named.isNotEmpty()) updateState { st -> st.copy(people = named.fold(st.people) { all, person -> all.withPerson(person) }) }
         cleanupSession.clear()
         _cleanupApplied.trySend(Unit)

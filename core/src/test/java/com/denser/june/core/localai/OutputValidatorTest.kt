@@ -223,7 +223,7 @@ class OutputValidatorTest {
         assertEquals("Lunch with @Bart and @Emma.", s.text)
         val r = OutputValidator.validate("Had lunch with @Bart and Emma.", barts, mentions = s.mentions)
         assertEquals("Had lunch with [@Bart](person:b2) and [@Emma](person:e1).", r.text)
-        assertTrue(r.changes.none { it.contains("could not tell") })
+        assertTrue(r.choices.isEmpty())
     }
 
     @Test
@@ -237,24 +237,32 @@ class OutputValidatorTest {
     }
 
     @Test
-    fun `a new name several people share goes to the one whose context is said nearby`() {
-        val r = OutputValidator.validate("At work I talked to Bart about the release.", barts)
-        assertEquals("At work I talked to [@Bart](person:b2) about the release.", r.text)
-        assertTrue(r.changes.none { it.contains("could not tell") })
+    fun `a new name several people share is left for the user to answer`() {
+        val r = OutputValidator.validate("Bart came over. Later Bart left.", barts)
+        assertEquals("[@Bart](person:?bart) came over. Later [@Bart](person:?bart) left.", r.text)
+        val choice = r.choices.single()
+        assertEquals("Bart", choice.name)
+        assertEquals(listOf(brother, colleague), choice.candidates)
+        assertEquals(null, choice.suggested)
     }
 
     @Test
-    fun `otherwise the namesake on the entry is meant`() {
-        val onEntry = listOf(brother.copy(onEntry = true), colleague)
-        val r = OutputValidator.validate("Bart came over.", onEntry)
-        assertEquals("[@Bart](person:b1) came over.", r.text)
+    fun `context said nearby or being on the entry is a suggestion, not a decision`() {
+        val atWork = OutputValidator.validate("At work I talked to Bart about the release.", barts)
+        assertEquals("b2", atWork.choices.single().suggested)
+        assertTrue(atWork.text.contains("(person:?bart)"))
+
+        val onEntry = OutputValidator.validate("Bart came over.", listOf(brother.copy(onEntry = true), colleague))
+        assertEquals("b1", onEntry.choices.single().suggested)
     }
 
     @Test
-    fun `a guess between namesakes is reported`() {
+    fun `an answered name becomes that person and an unanswered one plain text`() {
         val r = OutputValidator.validate("Bart came over.", barts)
-        assertEquals("[@Bart](person:b1) came over.", r.text)
-        assertTrue(r.changes.any { it.contains("could not tell which Bart") })
+        val key = r.choices.single().key
+        assertEquals("[@Bart](person:b2) came over.", NameChoice.settle(r.text, r.choices, mapOf(key to "b2")))
+        assertEquals("Bart came over.", NameChoice.settle(r.text, r.choices, emptyMap()))
+        assertEquals("Bart came over.", NameChoice.settle(r.text, r.choices, mapOf(key to "nobody")))
     }
 
     @Test

@@ -72,6 +72,9 @@ class CleanupSession(private val cleanup: DictationCleanup) {
                                 rewrite = outcome.rewrite,
                                 segments = withContext(Dispatchers.Default) { TextDiff.diff(outcome.original, outcome.rewrite) },
                                 changes = outcome.changes,
+                                choices = outcome.choices,
+                                // a suggestion starts out picked; it is shown, so it is still the user's call
+                                picks = outcome.choices.associate { it.key to it.suggested },
                             )
                         DictationCleanup.Outcome.ServerUnavailable -> CleanupUiState.Problem(CleanupUiState.Kind.ServerUnavailable)
                         DictationCleanup.Outcome.NotPaired -> CleanupUiState.Problem(CleanupUiState.Kind.NotPaired)
@@ -94,6 +97,13 @@ class CleanupSession(private val cleanup: DictationCleanup) {
             it.copy(entryKey = null, canOpenEntry = false, state = CleanupUiState.Hidden, source = null, minimized = false)
         }
     }
+
+    /** The user said who a shared name means, or with null that it is nobody's mention. */
+    fun pick(key: String, personId: String?) =
+        _snapshot.update { s ->
+            val review = s.state as? CleanupUiState.Review ?: return@update s
+            s.copy(state = review.copy(picks = review.picks + (key to personId)))
+        }
 
     /** The result was used or dismissed. */
     fun clear() = cancel()

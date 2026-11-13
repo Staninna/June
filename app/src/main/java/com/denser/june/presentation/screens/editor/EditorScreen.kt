@@ -639,6 +639,7 @@ fun EditorScreen(
                 viewModel.cancelCleanup()
                 navigator.navigateTo(Route.LocalAiSettings)
             },
+            onPickPerson = viewModel::pickCleanupPerson,
             formatted = cleanupReviewFormatted,
             onFormattedChange = viewModel::setCleanupReviewFormatted,
             fontFamily = getJournalFontFamily(fontName = state.font, variation = state.fontVariation),

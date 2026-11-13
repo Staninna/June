@@ -13,7 +13,8 @@ package com.denser.june.core.localai
  */
 object OutputValidator {
 
-    data class Result(val text: String, val changes: List<String>)
+    /** @param choices names in [text] that several people share, for the user to say who is meant. */
+    data class Result(val text: String, val changes: List<String>, val choices: List<NameChoice> = emptyList())
 
     private val INVISIBLE = Regex("[​‎‏⁠﻿]")
     private val NBSP = Regex("[   ]")
@@ -82,14 +83,15 @@ object OutputValidator {
         val names = DictationPrompt.names(people)
         val saidAs = mentions.entries.associate { it.key.removePrefix("@").trim().lowercase() to it.value }
         val idsInNotes = mentions.values.toSet()
-        val guessed = LinkedHashSet<String>()
+        val open = LinkedHashMap<String, NameChoice>()
         fun code(p: CleanupPerson) = "[@${p.name.trim()}](person:${p.id})"
 
         /**
          * Who [name] means. A name from the notes is the person it stood for there. A name only one
-         * person has is that person. For a name several people share, in this order: the one whose
-         * context ("brother", "work") is said near the name, the one on this entry, the one already
-         * mentioned in the notes, and failing all that the most recent one, which is reported.
+         * person has is that person. A name several people share is not decided here: it is left
+         * open as a [NameChoice] for the user to answer, with a suggestion when something points
+         * to one of them: their context ("brother", "work") is said near the name, they are the
+         * only one on this entry, or the only one already mentioned in the notes.
          */
         fun who(name: String, context: String): CleanupPerson? {
             var n = name.trim().removePrefix("@").trim()
@@ -102,14 +104,14 @@ object OutputValidator {
             val candidates = people.filter { it.name.trim().equals(n, ignoreCase = true) }
             if (candidates.size <= 1) return candidates.firstOrNull()
             val nearby = WORD.findAll(context.lowercase()).map { it.value }.toSet()
-            candidates.filter { c -> WORD.findAll(c.note.orEmpty().lowercase()).any { it.value.length >= 3 && it.value in nearby } }
-                .singleOrNull()?.let { return it }
-            val onEntry = candidates.filter { it.onEntry }
-            onEntry.singleOrNull()?.let { return it }
-            val inNotes = candidates.filter { it.id in idsInNotes }
-            inNotes.singleOrNull()?.let { return it }
-            guessed += candidates.first().name.trim()
-            return onEntry.firstOrNull() ?: inNotes.firstOrNull() ?: candidates.first()
+            val suggested =
+                candidates.filter { c -> WORD.findAll(c.note.orEmpty().lowercase()).any { it.value.length >= 3 && it.value in nearby } }.singleOrNull()
+                    ?: candidates.filter { it.onEntry }.singleOrNull()
+                    ?: candidates.filter { it.id in idsInNotes }.singleOrNull()
+            val choice = NameChoice(candidates.first().name.trim(), candidates, suggested?.id)
+            // the name can come up more than once: one question, and no suggestion if they disagree
+            open[choice.key] = open[choice.key]?.let { if (it.suggested == choice.suggested) it else it.copy(suggested = null) } ?: choice
+            return CleanupPerson(id = choice.key, name = choice.name)
         }
         fun around(range: IntRange): String =
             text.substring((range.first - CONTEXT).coerceAtLeast(0), (range.last + 1 + CONTEXT).coerceAtMost(text.length))
@@ -216,8 +218,6 @@ object OutputValidator {
             if (linked > 0) changes += "linked $linked name(s) to People"
         }
 
-        if (guessed.isNotEmpty()) changes += "could not tell which ${guessed.joinToString(", ")} you meant: check the name"
-
         // emphasis wrapping a mention breaks Hyphen's parser: drop those markers
         val beforeEmphasis = text
         text = unwrapEmphasisAroundMentions(text)
@@ -239,7 +239,7 @@ object OutputValidator {
                 // not at the start of a line: indentation belongs to nested lists
                 .replace(Regex("(?<=\\S)[ \t]{2,}"), " ")
                 .trim()
-        return Result(text, changes.distinct())
+        return Result(text, changes.distinct(), open.values.filter { text.contains("(person:${it.key})") })
     }
 
     private fun stripCodeFence(text: String): String {

@@ -25,7 +25,13 @@ class DictationCleanup(
     private val prefs: LocalAiStore,
 ) {
     sealed interface Outcome {
-        data class Rewrite(val original: String, val rewrite: String, val changes: List<String>) : Outcome
+        /** @param choices names in [rewrite] that several people share, still to be answered. */
+        data class Rewrite(
+            val original: String,
+            val rewrite: String,
+            val changes: List<String>,
+            val choices: List<NameChoice> = emptyList(),
+        ) : Outcome
 
         /** The server could not be reached (not installed / not running / Network permission off). */
         data object ServerUnavailable : Outcome
@@ -258,7 +264,7 @@ class DictationCleanup(
                     )
                 val changes =
                     if (ended.completion.finishReason == FINISH_LENGTH) result.changes + CHANGE_CUT_OFF else result.changes
-                if (result.text.isBlank()) Outcome.EmptyResult else Outcome.Rewrite(body, result.text, changes)
+                if (result.text.isBlank()) Outcome.EmptyResult else Outcome.Rewrite(body, result.text, changes, result.choices)
             }
         }
     }

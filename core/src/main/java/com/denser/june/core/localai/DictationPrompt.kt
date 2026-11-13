@@ -254,3 +254,33 @@ data class CleanupPerson(
     /** This person is on the entry that is being cleaned up. */
     val onEntry: Boolean = false,
 )
+
+/**
+ * A name in a rewrite that several people share. Nobody guesses who is meant: the mention stays
+ * open, written as `[@Bart](person:?bart)`, until the user picks one of [candidates] or says it
+ * is none of them.
+ *
+ * @param suggested the candidate something in the entry points to, if any. Shown as picked,
+ *   and still the user's call.
+ */
+data class NameChoice(val name: String, val candidates: List<CleanupPerson>, val suggested: String? = null) {
+    /** What stands in for the person's id while the question is open. */
+    val key: String
+        get() = OPEN + name.trim().lowercase()
+
+    companion object {
+        private const val OPEN = "?"
+        private val OPEN_MENTION = Regex("""\[@?([^\[\]]*)\]\(person:(\?[^()\n]+)\)""")
+
+        /**
+         * Settles the open mentions in [text]. [picks] says per [key] which person is meant; a name
+         * without a pick is not a mention of anyone and becomes plain text.
+         */
+        fun settle(text: String, choices: List<NameChoice>, picks: Map<String, String?>): String =
+            OPEN_MENTION.replace(text) { m ->
+                val key = m.groupValues[2]
+                val person = choices.firstOrNull { it.key == key }?.candidates?.firstOrNull { it.id == picks[key] }
+                if (person != null) "[@${person.name.trim()}](person:${person.id})" else m.groupValues[1].removePrefix("@").trim()
+            }
+    }
+}

@@ -65,6 +65,11 @@ import androidx.compose.runtime.produceState
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import com.denser.june.core.localai.DictationCleanup
 import com.denser.june.core.localai.EditedMeanwhile
+import com.denser.june.core.localai.NameChoice
+import com.denser.june.core.domain.model.JournalPerson
+import com.denser.june.presentation.screens.editor.components.people.PersonAvatar
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.ui.text.style.TextOverflow
@@ -104,6 +109,8 @@ fun CleanupReviewSheet(
     edits: EditedMeanwhile,
     onOpenServer: (() -> Unit)?,
     onOpenSettings: () -> Unit,
+    /** The answer to who a shared name means: its key and the person's id, or null for nobody. */
+    onPickPerson: (String, String?) -> Unit = { _, _ -> },
     /** Show the texts as in the entry (true) or as Markdown (false). */
     formatted: Boolean = true,
     onFormattedChange: (Boolean) -> Unit = {},
@@ -139,7 +146,7 @@ fun CleanupReviewSheet(
                     is CleanupUiState.Working -> WorkingContent(s, onCancel, onMinimize)
                     is CleanupUiState.Problem -> ProblemContent(s, onRetry, onCancel, onOpenServer, onOpenSettings)
                     is CleanupUiState.Review ->
-                        ReviewContent(s, maxHeight, edits, onAccept, onRetry, onCancel, formatted, onFormattedChange, fontFamily)
+                        ReviewContent(s, maxHeight, edits, onAccept, onRetry, onCancel, formatted, onFormattedChange, fontFamily, onPickPerson)
                     CleanupUiState.Hidden -> Spacer(Modifier.height(1.dp))
                 }
             }
@@ -364,6 +371,7 @@ private fun ReviewContent(
     formatted: Boolean,
     onFormattedChange: (Boolean) -> Unit,
     fontFamily: FontFamily?,
+    onPickPerson: (String, String?) -> Unit,
 ) {
     var tab by rememberSaveable { mutableStateOf(ReviewView.Changes) }
     var confirmReplace by remember { mutableStateOf(false) }
@@ -510,6 +518,10 @@ private fun ReviewContent(
                 )
             }
         }
+        state.choices.forEach { choice ->
+            Spacer(Modifier.height(8.dp))
+            WhoIsMeant(choice, picked = state.picks[choice.key], onPick = { onPickPerson(choice.key, it) })
+        }
         if (edits is EditedMeanwhile.Added) {
             // Written while the cleanup ran: not in the rewrite, and not lost. It goes after it.
             Spacer(Modifier.height(8.dp))
@@ -561,6 +573,51 @@ private fun ReviewContent(
                 label = stringResource(R.string.cleanup_accept),
                 icon = { Icon(painterResource(R.drawable.check_24px), contentDescription = null) },
             )
+        }
+    }
+}
+
+/**
+ * Several people have this name, and the rewrite cannot know which one was meant. The user says
+ * who, or that it is none of them, in which case the name stays plain text.
+ */
+@Composable
+private fun WhoIsMeant(choice: NameChoice, picked: String?, onPick: (String?) -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        color = scheme.secondaryContainer.copy(alpha = 0.5f),
+        contentColor = scheme.onSecondaryContainer,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(Modifier.padding(vertical = 12.dp)) {
+            Text(
+                stringResource(R.string.cleanup_who_is, choice.name),
+                style = MaterialTheme.typography.labelLarge,
+                modifier = Modifier.padding(horizontal = 20.dp).semantics { heading() },
+            )
+            Spacer(Modifier.height(8.dp))
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp).selectableGroup(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                choice.candidates.forEach { candidate ->
+                    val person = JournalPerson(id = candidate.id, name = candidate.name, note = candidate.note)
+                    FilterChip(
+                        selected = picked == candidate.id,
+                        onClick = { onPick(candidate.id) },
+                        leadingIcon = { PersonAvatar(person, size = 24.dp) },
+                        label = { Text(person.displayName) },
+                        shape = CircleShape,
+                    )
+                }
+                FilterChip(
+                    selected = choice.candidates.none { it.id == picked },
+                    onClick = { onPick(null) },
+                    label = { Text(stringResource(R.string.cleanup_who_nobody)) },
+                    shape = CircleShape,
+                )
+            }
         }
     }
 }

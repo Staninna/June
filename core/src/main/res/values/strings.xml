@@ -721,6 +721,7 @@
     <string name="people_contact_unavailable">Couldn’t open this contact</string>
     <string name="people_selected">Added</string>
     <string name="people_add_new_desc">New person</string>
+    <string name="people_use_contact_details">Use photo and details from contacts</string>
     <string name="people_add_another">Add another “%1$s”</string>
     <string name="people_add_another_desc">Someone else with the same name</string>
     <string name="people_namesake_hint">There is another %1$s. Context tells them apart.</string>
@@ -811,6 +812,8 @@
     <string name="cleanup_tab_changes">Changes</string>
     <string name="cleanup_tab_original">Original</string>
     <string name="cleanup_tab_rewrite">Rewrite</string>
+    <string name="cleanup_who_is">Which %1$s?</string>
+    <string name="cleanup_who_nobody">Someone else</string>
     <string name="cleanup_view_formatted">Show as in the entry</string>
     <string name="cleanup_view_markdown">Show the Markdown</string>
     <string name="cleanup_accept">Accept</string>

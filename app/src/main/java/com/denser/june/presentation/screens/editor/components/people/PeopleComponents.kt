@@ -78,13 +78,21 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.denser.june.core.R
 import com.denser.june.core.domain.model.JournalPerson
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.layout.ContentScale
+import androidx.core.content.ContextCompat
+import coil.compose.AsyncImage
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextAlign
 import com.denser.june.presentation.components.JuneConnectedItem
 import com.denser.june.presentation.components.JuneConnectedRowItem
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.absoluteValue
 
 // -------------------------------------------------------------------------------------------------
@@ -131,6 +139,8 @@ fun PersonAvatar(
     size: Dp = 40.dp,
 ) {
     val style = avatarStyleFor(person)
+    val context = LocalContext.current
+    val lookupKey = person.contactLookupKey
     Box(
         modifier = modifier
             .size(size)
@@ -145,6 +155,16 @@ fun PersonAvatar(
             fontSize = (size.value * 0.36f).sp,
             maxLines = 1
         )
+        // The contact's own photo, when June may read contacts and the contact has one.
+        // Without either, nothing is drawn here and the initials show.
+        if (lookupKey != null && ContactsAccess.isGranted(context)) {
+            AsyncImage(
+                model = contactPhotoUri(lookupKey),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.matchParentSize()
+            )
+        }
     }
 }
 
@@ -367,6 +387,68 @@ fun PersonSuggestionChip(
 
 private data class PickedContact(val name: String, val lookupKey: String?)
 
+/**
+ * Whether June may read contacts. It never needs to: picking and opening a contact work without.
+ * With it, a linked contact's photo is shown and their context is filled in from the contact.
+ */
+object ContactsAccess {
+    private var asked by mutableStateOf(0)
+
+    fun isGranted(context: Context): Boolean {
+        asked // read, so everything showing contact details updates once access is given
+        return ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED
+    }
+
+    /** Call after the permission dialog was answered. */
+    fun answered() {
+        asked++
+    }
+}
+
+fun contactPhotoUri(lookupKey: String): Uri =
+    Uri.withAppendedPath(
+        Uri.withAppendedPath(ContactsContract.Contacts.CONTENT_LOOKUP_URI, lookupKey),
+        ContactsContract.Contacts.Photo.CONTENT_DIRECTORY
+    )
+
+/**
+ * What the contact itself says about who this is: "Acme · Engineer" from the organisation, or
+ * else the nickname. Null without access to contacts, or when the contact has neither.
+ */
+fun contactContext(context: Context, lookupKey: String): String? {
+    if (!ContactsAccess.isGranted(context)) return null
+    return runCatching {
+        val org = ContactsContract.CommonDataKinds.Organization.CONTENT_ITEM_TYPE
+        val nick = ContactsContract.CommonDataKinds.Nickname.CONTENT_ITEM_TYPE
+        var company: String? = null
+        var title: String? = null
+        var nickname: String? = null
+        context.contentResolver.query(
+            ContactsContract.Data.CONTENT_URI,
+            arrayOf(
+                ContactsContract.Data.MIMETYPE,
+                ContactsContract.CommonDataKinds.Organization.COMPANY,
+                ContactsContract.CommonDataKinds.Organization.TITLE,
+            ),
+            "${ContactsContract.Data.LOOKUP_KEY} = ? AND ${ContactsContract.Data.MIMETYPE} IN (?, ?)",
+            arrayOf(lookupKey, org, nick),
+            null
+        )?.use { c ->
+            while (c.moveToNext()) {
+                when (c.getString(0)) {
+                    org -> {
+                        company = company ?: c.getString(1)?.trim()?.takeIf { it.isNotEmpty() }
+                        title = title ?: c.getString(2)?.trim()?.takeIf { it.isNotEmpty() }
+                    }
+                    // a nickname is stored in the same column an organisation keeps its company in
+                    nick -> nickname = nickname ?: c.getString(1)?.trim()?.takeIf { it.isNotEmpty() }
+                }
+            }
+        }
+        listOfNotNull(company, title).joinToString(" · ").ifEmpty { nickname }?.take(80)
+    }.getOrNull()
+}
+
 private fun readPickedContact(context: Context, uri: Uri): PickedContact? = runCatching {
     context.contentResolver.query(
         uri,
@@ -435,6 +517,7 @@ fun PeoplePickerSheet(
     val trimmed = query.trim()
 
     val everyone = remember(selected, known) { (selected + known).distinctBy { it.id } }
+    val pickerContext = LocalContext.current
 
     val pickContact = rememberContactPicker { picked ->
         // The same contact is the same person. Otherwise the one person with that name who has
@@ -444,7 +527,9 @@ fun PeoplePickerSheet(
             ?: sameName.singleOrNull()?.takeIf { it.contactLookupKey == null }?.copy(contactLookupKey = picked.lookupKey)
             ?: JournalPerson(name = picked.name, contactLookupKey = picked.lookupKey)
         haptics.performHapticFeedback(HapticFeedbackType.Confirm)
-        onAdd(person)
+        // who they are comes from the contact, when June may read it and nothing was written yet
+        val context = person.note ?: picked.lookupKey?.let { contactContext(pickerContext, it) }
+        onAdd(person.copy(note = context))
     }
 
     fun matches(p: JournalPerson) = trimmed.isEmpty() ||
@@ -831,6 +916,19 @@ fun PersonDetailSheet(
     }
     val hasNamesake = everyone.any { it.id != person.id && it.hasName(draft.name) }
 
+    val contactsGranted = ContactsAccess.isGranted(context)
+    val askForContacts = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
+        ContactsAccess.answered()
+    }
+    // Context comes from the contact when there is one to read and nothing was written yet.
+    LaunchedEffect(lookupKey, contactsGranted) {
+        val key = lookupKey ?: return@LaunchedEffect
+        if (note.isBlank()) {
+            val fromContact = withContext(Dispatchers.IO) { contactContext(context, key) }
+            if (fromContact != null && note.isBlank()) note = fromContact
+        }
+    }
+
     fun close(save: Boolean) {
         scope.launch { sheetState.hide() }.invokeOnCompletion {
             if (save && draft != person) onSave(draft)
@@ -944,6 +1042,14 @@ fun PersonDetailSheet(
                 },
                 onUnlink = { lookupKey = null }
             )
+            if (linked != null && !contactsGranted) {
+                TextButton(
+                    onClick = { askForContacts.launch(Manifest.permission.READ_CONTACTS) },
+                    modifier = Modifier.align(Alignment.Start)
+                ) {
+                    Text(stringResource(R.string.people_use_contact_details))
+                }
+            }
 
             Spacer(Modifier.height(16.dp))
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {

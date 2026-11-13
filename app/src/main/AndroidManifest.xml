@@ -2,6 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Optional, asked for from a person's details: shows a linked contact's photo and fills in their context. -->
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
     <uses-permission android:name="android.permission.INTERNET" />
     <queries>
         <!-- Local AI server (docs/LOCAL_LLM_API.md §3): pairing and "Open server app" -->
