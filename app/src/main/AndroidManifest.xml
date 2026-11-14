@@ -2,7 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
-    <!-- Optional, asked for from a person's details: shows a linked contact's photo and fills in their context. -->
+    <!-- Optional, asked for from a person's details: fills in a linked contact's organisation or nickname as the person's labels. -->
     <uses-permission android:name="android.permission.READ_CONTACTS" />
     <uses-permission android:name="android.permission.INTERNET" />
     <queries>

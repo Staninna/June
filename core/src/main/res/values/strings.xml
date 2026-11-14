@@ -712,6 +712,7 @@
     <string name="people_label_new_hint">Name the label</string>
     <string name="people_label_add">Add label</string>
     <string name="people_color_n">Colour %1$d</string>
+    <string name="people_shape_n">Shape %1$d</string>
     <string name="people_label_main">Main label</string>
     <string name="people_label_make_main">Make main label</string>
     <string name="people_note_family">Family</string>
@@ -726,7 +727,7 @@
     <string name="people_contact_unavailable">Couldn’t open this contact</string>
     <string name="people_selected">Added</string>
     <string name="people_add_new_desc">New person</string>
-    <string name="people_use_contact_details">Use photo and details from contacts</string>
+    <string name="people_use_contact_details">Use details from contacts</string>
     <string name="people_add_another">Add another “%1$s”</string>
     <string name="people_add_another_desc">Someone else with the same name</string>
     <string name="people_namesake_hint">There is another %1$s. A label tells them apart.</string>

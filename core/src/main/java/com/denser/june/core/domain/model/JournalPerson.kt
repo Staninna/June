@@ -32,6 +32,10 @@ data class JournalPerson(
     @OptIn(ExperimentalSerializationApi::class)
     @EncodeDefault(EncodeDefault.Mode.NEVER)
     val color: Int? = null,
+    /** The shape picked for this person's icon, as a place in the app's set of shapes, or null. */
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val shape: Int? = null,
 ) {
     val initials: String
         get() = name.trim()
@@ -45,6 +49,13 @@ data class JournalPerson(
                 }
             }
             .uppercase()
+
+    /**
+     * What a person's icon follows from when no colour or shape was picked: their contact, or
+     * else their name. It is what icons have always followed from, so they look as they did.
+     */
+    val iconSeed: String
+        get() = contactLookupKey?.let { "contact:$it" } ?: "name:${name.trim().lowercase()}"
 
     /** What makes this person this person: the id. Never the name. */
     val identityKey: String

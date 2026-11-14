@@ -93,9 +93,7 @@ import androidx.compose.ui.focus.focusRequester
 import android.Manifest
 import android.content.pm.PackageManager
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.ui.layout.ContentScale
 import androidx.core.content.ContextCompat
-import coil.compose.AsyncImage
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -125,28 +123,33 @@ fun personColors(): List<Pair<Color, Color>> {
     )
 }
 
+/** The shapes a person's icon can have. */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun personShapes() = remember {
+    listOf(
+        MaterialShapes.Cookie9Sided,
+        MaterialShapes.Clover4Leaf,
+        MaterialShapes.Sunny,
+        MaterialShapes.Cookie6Sided,
+        MaterialShapes.Flower,
+        MaterialShapes.Pill,
+        MaterialShapes.Circle,
+        MaterialShapes.Gem,
+    )
+}
+
 private data class AvatarStyle(val container: Color, val content: Color, val shape: Shape)
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun avatarStyleFor(person: JournalPerson): AvatarStyle {
     val palettes = personColors()
-    val shapes = remember {
-        listOf(
-            MaterialShapes.Cookie9Sided,
-            MaterialShapes.Clover4Leaf,
-            MaterialShapes.Sunny,
-            MaterialShapes.Cookie6Sided,
-            MaterialShapes.Flower,
-            MaterialShapes.Pill,
-            MaterialShapes.Circle,
-            MaterialShapes.Gem,
-        )
-    }
-    val hash = person.identityKey.hashCode().absoluteValue
-    // the colour the user picked for them, or else one that follows from who they are
+    val shapes = personShapes()
+    // What was picked for them, or else what follows from who they are, as it always has.
+    val hash = person.iconSeed.hashCode().absoluteValue
     val (bg, fg) = palettes[(person.color ?: hash).mod(palettes.size)]
-    val shape = shapes[(hash / palettes.size) % shapes.size].toShape()
+    val shape = shapes[(person.shape ?: (hash / palettes.size)).mod(shapes.size)].toShape()
     return AvatarStyle(bg, fg, shape)
 }
 
@@ -158,8 +161,6 @@ fun PersonAvatar(
     size: Dp = 40.dp,
 ) {
     val style = avatarStyleFor(person)
-    val context = LocalContext.current
-    val lookupKey = person.contactLookupKey
     Box(
         modifier = modifier
             .size(size)
@@ -174,16 +175,6 @@ fun PersonAvatar(
             fontSize = (size.value * 0.36f).sp,
             maxLines = 1
         )
-        // The contact's own photo, when June may read contacts and the contact has one.
-        // Without either, nothing is drawn here and the initials show.
-        if (lookupKey != null && ContactsAccess.isGranted(context)) {
-            AsyncImage(
-                model = contactPhotoUri(lookupKey),
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.matchParentSize()
-            )
-        }
     }
 }
 
@@ -408,7 +399,7 @@ private data class PickedContact(val name: String, val lookupKey: String?)
 
 /**
  * Whether June may read contacts. It never needs to: picking and opening a contact work without.
- * With it, a linked contact's photo is shown and their context is filled in from the contact.
+ * With it, a linked contact's organisation or nickname becomes the person's labels.
  */
 object ContactsAccess {
     private var asked by mutableStateOf(0)
@@ -423,12 +414,6 @@ object ContactsAccess {
         asked++
     }
 }
-
-fun contactPhotoUri(lookupKey: String): Uri =
-    Uri.withAppendedPath(
-        Uri.withAppendedPath(ContactsContract.Contacts.CONTENT_LOOKUP_URI, lookupKey),
-        ContactsContract.Contacts.Photo.CONTENT_DIRECTORY
-    )
 
 /**
  * What the contact itself says about who this is: "Acme · Engineer" from the organisation, or
@@ -923,12 +908,14 @@ fun PersonDetailSheet(
     var note by remember(person.id) { mutableStateOf(person.note.orEmpty()) }
     var lookupKey by remember(person.id) { mutableStateOf(person.contactLookupKey) }
     var color by remember(person.id) { mutableStateOf(person.color) }
+    var shape by remember(person.id) { mutableStateOf(person.shape) }
 
     val draft = person.copy(
         name = name.trim().ifEmpty { person.name },
         note = note.trim().ifEmpty { null },
         contactLookupKey = lookupKey,
-        color = color
+        color = color,
+        shape = shape
     )
 
     val pickContact = rememberContactPicker { picked ->
@@ -1015,6 +1002,7 @@ fun PersonDetailSheet(
             }
             Spacer(Modifier.height(12.dp))
             PersonColorDots(picked = color, onPick = { color = it })
+            PersonShapeDots(person = draft, picked = shape, onPick = { shape = it })
             Spacer(Modifier.height(16.dp))
 
             val fieldColors = TextFieldDefaults.colors(
@@ -1194,6 +1182,46 @@ private fun PersonColorDots(picked: Int?, onPick: (Int?) -> Unit) {
                         .clip(CircleShape)
                         .background(background)
                         .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape)
+                )
+            }
+        }
+    }
+}
+
+/**
+ * The shape of a person's icon, as a row of small shapes in their colour. Tapping the picked one
+ * again gives the choice back to June.
+ */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun PersonShapeDots(person: JournalPerson, picked: Int?, onPick: (Int?) -> Unit) {
+    val shapes = personShapes()
+    val fill = avatarStyleFor(person).container
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        modifier = Modifier.selectableGroup()
+    ) {
+        shapes.forEachIndexed { index, shape ->
+            val isPicked = picked == index
+            val label = stringResource(R.string.people_shape_n, index + 1)
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .background(if (isPicked) MaterialTheme.colorScheme.surfaceContainerHighest else Color.Transparent)
+                    .selectable(
+                        selected = isPicked,
+                        role = Role.RadioButton,
+                        onClick = { onPick(if (isPicked) null else index) }
+                    )
+                    .semantics { contentDescription = label }
+            ) {
+                Box(
+                    Modifier
+                        .size(22.dp)
+                        .clip(shape.toShape())
+                        .background(if (isPicked) fill else MaterialTheme.colorScheme.outline)
                 )
             }
         }

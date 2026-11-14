@@ -197,7 +197,15 @@ class JournalPersonTest {
         val json = Json { encodeDefaults = true; explicitNulls = true }
         val plain = json.encodeToString(JournalPerson.serializer(), JournalPerson(id = "p", name = "Anna"))
         assertFalse(plain.contains("color"))
-        val coloured = JournalPerson(id = "p", name = "Anna", color = 3)
+        assertFalse(plain.contains("shape"))
+        val coloured = JournalPerson(id = "p", name = "Anna", color = 3, shape = 5)
         assertEquals(coloured, json.decodeFromString(JournalPerson.serializer(), json.encodeToString(JournalPerson.serializer(), coloured)))
+    }
+
+    @Test
+    fun `an icon follows from the contact or the name, not from the id`() {
+        assertEquals("name:anna", JournalPerson(id = "1", name = " Anna ").iconSeed)
+        assertEquals(JournalPerson(id = "1", name = "Anna").iconSeed, JournalPerson(id = "2", name = "anna").iconSeed)
+        assertEquals("contact:k", JournalPerson(name = "Anna", contactLookupKey = "k").iconSeed)
     }
 }
