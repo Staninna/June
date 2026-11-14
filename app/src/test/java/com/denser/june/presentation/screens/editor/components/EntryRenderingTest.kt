@@ -62,4 +62,15 @@ class EntryRenderingTest {
         assertTrue(addedText.contains("I"))
         assertFalse(changes.text.contains("**"))
     }
+
+    @Test
+    fun `white space that came or went is not marked as a change`() {
+        val review = RenderedReview.of(
+            original = "Went out with [@Emma](person:Emma).\n\n[#carnaval](topic:carnaval)\n\n",
+            rewrite = "Went out with [@Emma](person:some-id).\n\n[#carnaval](topic:carnaval)",
+        )
+        val changes = show(review, ReviewView.Changes)
+        assertEquals("Went out with @Emma.\n\n#carnaval", changes.text)
+        assertTrue(changes.spanStyles.none { it.item == added || it.item == removed })
+    }
 }

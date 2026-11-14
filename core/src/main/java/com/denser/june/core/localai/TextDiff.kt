@@ -63,6 +63,15 @@ object TextDiff {
         return out
     }
 
-    // whitespace differences (e.g. a new paragraph break) are not worth highlighting
-    private fun same(x: String, y: String) = x == y || (x.isBlank() && y.isBlank())
+    private val MENTION = Regex("""\[@?([^\]]*)]\(person:[^)]*\)""")
+
+    // White space differences (e.g. a new paragraph break) are not worth highlighting. Neither
+    // is a mention that reads the same and only points to the person in another way: older
+    // mentions carry a name where newer ones carry the person's id.
+    private fun same(x: String, y: String): Boolean {
+        if (x == y || (x.isBlank() && y.isBlank())) return true
+        val a = MENTION.matchEntire(x) ?: return false
+        val b = MENTION.matchEntire(y) ?: return false
+        return a.groupValues[1].trim().equals(b.groupValues[1].trim(), ignoreCase = true)
+    }
 }

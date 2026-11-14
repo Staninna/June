@@ -162,12 +162,15 @@ fun AnnotatedString.Builder.appendReview(
             TextDiff.Op.Equal ->
                 if (view == ReviewView.Original) appendRendered(review.original, inOriginal, inOriginal + seg.oldText.length, styles)
                 else appendRendered(review.rewrite, inRewrite, inRewrite + seg.text.length, styles)
+            // White space that came or went is laid out, never marked: a struck-through blank
+            // reads as a stray dash, and a removed one has nothing to show in Changes.
             TextDiff.Op.Added ->
                 if (view != ReviewView.Original) {
-                    appendRendered(review.rewrite, inRewrite, inRewrite + seg.text.length, styles, added.takeIf { view == ReviewView.Changes })
+                    val mark = added.takeIf { view == ReviewView.Changes && seg.text.isNotBlank() }
+                    appendRendered(review.rewrite, inRewrite, inRewrite + seg.text.length, styles, mark)
                 }
             TextDiff.Op.Removed ->
-                if (view != ReviewView.Rewrite) {
+                if (view == ReviewView.Original || (view == ReviewView.Changes && seg.oldText.isNotBlank())) {
                     appendRendered(review.original, inOriginal, inOriginal + seg.oldText.length, styles, removed.takeIf { view == ReviewView.Changes })
                 }
         }

@@ -84,14 +84,14 @@ import com.denser.june.presentation.screens.editor.CleanupUiState
 import com.denser.june.presentation.screens.editor.components.RenderedReview
 import com.denser.june.presentation.screens.editor.components.ReviewView
 import com.denser.june.presentation.screens.editor.components.appendReview
+import com.denser.june.presentation.screens.editor.components.appendRendered
+import com.denser.june.presentation.screens.editor.components.renderEntry
 import com.denser.june.presentation.screens.editor.components.juneEntryStyleConfig
 import androidx.compose.material3.FilledTonalIconToggleButton
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontFamily
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-
-private val MENTION = Regex("""\[@([^\]]*)]\(person:[^)]*\)""")
 
 /**
  * Bottom sheet for "Clean up dictation": progress, a friendly problem state, or a review of the
@@ -121,7 +121,7 @@ fun CleanupReviewSheet(
     // Swiping the sheet down, a tap next to it or Back only puts it away: the cleanup carries on
     // (or the rewrite keeps waiting) and shows on the sparkle button. Only the buttons end it.
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val maxHeight = (LocalConfiguration.current.screenHeightDp * 0.62f).dp
+    val maxSheetHeight = (LocalConfiguration.current.screenHeightDp * 0.86f).dp
 
     ModalBottomSheet(
         sheetState = sheetState,
@@ -130,7 +130,10 @@ fun CleanupReviewSheet(
         dragHandle = null,
     ) {
         Column(
-            Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 16.dp).navigationBarsPadding(),
+            // A fixed share of the screen at most. The sheet then never reaches the status bar, so
+            // the room it has does not depend on where it is, and dragging it cannot make it
+            // measure itself again and jump between two sizes.
+            Modifier.fillMaxWidth().heightIn(max = maxSheetHeight).padding(horizontal = 20.dp).padding(bottom = 16.dp).navigationBarsPadding(),
         ) {
             Box(
                 Modifier.padding(top = 16.dp).align(Alignment.CenterHorizontally).width(36.dp).height(4.dp)
@@ -146,7 +149,7 @@ fun CleanupReviewSheet(
                     is CleanupUiState.Working -> WorkingContent(s, onCancel, onMinimize)
                     is CleanupUiState.Problem -> ProblemContent(s, onRetry, onCancel, onOpenServer, onOpenSettings)
                     is CleanupUiState.Review ->
-                        ReviewContent(s, maxHeight, edits, onAccept, onRetry, onCancel, formatted, onFormattedChange, fontFamily, onPickPerson)
+                        ReviewContent(s, edits, onAccept, onRetry, onCancel, formatted, onFormattedChange, fontFamily, onPickPerson)
                     CleanupUiState.Hidden -> Spacer(Modifier.height(1.dp))
                 }
             }
@@ -363,7 +366,6 @@ private fun ProblemContent(
 @Composable
 private fun ReviewContent(
     state: CleanupUiState.Review,
-    maxHeight: androidx.compose.ui.unit.Dp,
     edits: EditedMeanwhile,
     onAccept: () -> Unit,
     onRetry: () -> Unit,
@@ -405,7 +407,6 @@ private fun ReviewContent(
             color = scheme.onErrorContainer,
             textDecoration = TextDecoration.LineThrough,
         )
-    val mention = SpanStyle(color = scheme.primary, fontWeight = FontWeight.Medium)
     val entryStyles = juneEntryStyleConfig()
 
     // Parsing and comparing a long entry takes a moment: not on the frame that opens the sheet.
@@ -421,20 +422,26 @@ private fun ReviewContent(
                 if (shown != null) {
                     appendReview(shown, tab, entryStyles, added, removed)
                 } else {
+                    // the Markdown exactly as it is stored: no part of it is prettied up
                     for (seg in state.segments) {
-                        val style =
-                            when (seg.op) {
-                                TextDiff.Op.Equal -> null
-                                TextDiff.Op.Added -> if (tab == ReviewView.Original) continue else added.takeIf { tab == ReviewView.Changes }
-                                TextDiff.Op.Removed -> if (tab == ReviewView.Rewrite) continue else removed.takeIf { tab == ReviewView.Changes }
-                            }
-                        if (style != null) withStyle(style) { appendWithMentions(seg.text, mention) }
-                        else appendWithMentions(seg.text, mention)
+                        when (seg.op) {
+                            TextDiff.Op.Equal -> append(if (tab == ReviewView.Original) seg.oldText else seg.text)
+                            TextDiff.Op.Added ->
+                                if (tab != ReviewView.Original) {
+                                    if (tab == ReviewView.Changes && seg.text.isNotBlank()) withStyle(added) { append(seg.text) }
+                                    else append(seg.text)
+                                }
+                            TextDiff.Op.Removed ->
+                                if (tab == ReviewView.Original) append(seg.oldText)
+                                else if (tab == ReviewView.Changes && seg.oldText.isNotBlank()) withStyle(removed) { append(seg.oldText) }
+                        }
                     }
                 }
             }
         }
 
+    // The text is the one part that gives way: it takes the room that is left and scrolls, so
+    // the tabs above it and the buttons below it are always on screen, whatever else is shown.
     Column(Modifier.fillMaxWidth()) {
         Column(Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
@@ -499,7 +506,7 @@ private fun ReviewContent(
         Surface(
             shape = RoundedCornerShape(24.dp),
             color = scheme.surfaceContainer,
-            modifier = Modifier.fillMaxWidth().heightIn(max = maxHeight),
+            modifier = Modifier.fillMaxWidth().weight(1f, fill = false),
         ) {
             SelectionContainer {
                 Text(
@@ -534,10 +541,20 @@ private fun ReviewContent(
                 Column(Modifier.padding(horizontal = 20.dp, vertical = 12.dp)) {
                     Text(stringResource(R.string.cleanup_kept), style = MaterialTheme.typography.labelLarge)
                     Spacer(Modifier.height(2.dp))
+                    // shown like the text above it: as in the entry, or as Markdown
+                    val kept = remember(edits.text, formatted, entryStyles) {
+                        if (!formatted) AnnotatedString(edits.text)
+                        else buildAnnotatedString {
+                            val entry = renderEntry(edits.text)
+                            appendRendered(entry, 0, entry.text.length, entryStyles)
+                        }
+                    }
                     Text(
-                        edits.text,
-                        style = MaterialTheme.typography.bodyMedium,
-                        maxLines = 3,
+                        kept,
+                        style =
+                            if (formatted) MaterialTheme.typography.bodyMedium.copy(fontFamily = fontFamily ?: MaterialTheme.typography.bodyMedium.fontFamily)
+                            else MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
@@ -624,15 +641,3 @@ private fun WhoIsMeant(choice: NameChoice, picked: String?, onPick: (String?) ->
         }
     }
 }
-
-/** Shows `[@Emma](person:Emma)` as a styled "@Emma", like the editor does. */
-private fun AnnotatedString.Builder.appendWithMentions(text: String, mentionStyle: SpanStyle) {
-    var last = 0
-    for (m in MENTION.findAll(text)) {
-        append(text.substring(last, m.range.first))
-        withStyle(mentionStyle) { append("@" + m.groupValues[1].removePrefix("@")) }
-        last = m.range.last + 1
-    }
-    append(text.substring(last))
-}
-

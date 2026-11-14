@@ -33,4 +33,14 @@ class TextDiffTest {
         val d = TextDiff.diff("a ".repeat(3000), "b ".repeat(3000), maxCells = 1000)
         assertEquals(listOf(Op.Removed, Op.Added), d.map { it.op })
     }
+
+    @Test
+    fun `a mention that reads the same is not a change when only its id differs`() {
+        val segments = TextDiff.diff("with [@Emma](person:Emma) and Krijn", "with [@Emma](person:7f3a-id) and Krijn")
+        assertEquals(listOf(TextDiff.Op.Equal), segments.map { it.op })
+        // the new text is what is kept
+        assertEquals("with [@Emma](person:7f3a-id) and Krijn", segments.joinToString("") { it.text })
+        // another name is a change
+        assertTrue(TextDiff.diff("[@Emma](person:a)", "[@Noor](person:a)").any { it.op != TextDiff.Op.Equal })
+    }
 }
