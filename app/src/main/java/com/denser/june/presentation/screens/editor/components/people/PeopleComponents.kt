@@ -78,6 +78,18 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.denser.june.core.R
 import com.denser.june.core.domain.model.JournalPerson
+import com.denser.june.core.domain.model.PersonLabels
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import android.Manifest
 import android.content.pm.PackageManager
 import androidx.compose.runtime.LaunchedEffect
@@ -99,13 +111,11 @@ import kotlin.math.absoluteValue
 // Avatar
 // -------------------------------------------------------------------------------------------------
 
-private data class AvatarStyle(val container: Color, val content: Color, val shape: Shape)
-
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+/** The colours a person can have: background and what is drawn on it. They follow the theme. */
 @Composable
-private fun avatarStyleFor(person: JournalPerson): AvatarStyle {
+fun personColors(): List<Pair<Color, Color>> {
     val c = MaterialTheme.colorScheme
-    val palettes = listOf(
+    return listOf(
         c.primaryContainer to c.onPrimaryContainer,
         c.secondaryContainer to c.onSecondaryContainer,
         c.tertiaryContainer to c.onTertiaryContainer,
@@ -113,6 +123,14 @@ private fun avatarStyleFor(person: JournalPerson): AvatarStyle {
         c.tertiary to c.onTertiary,
         c.inversePrimary to c.onSurface,
     )
+}
+
+private data class AvatarStyle(val container: Color, val content: Color, val shape: Shape)
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun avatarStyleFor(person: JournalPerson): AvatarStyle {
+    val palettes = personColors()
     val shapes = remember {
         listOf(
             MaterialShapes.Cookie9Sided,
@@ -126,7 +144,8 @@ private fun avatarStyleFor(person: JournalPerson): AvatarStyle {
         )
     }
     val hash = person.identityKey.hashCode().absoluteValue
-    val (bg, fg) = palettes[hash % palettes.size]
+    // the colour the user picked for them, or else one that follows from who they are
+    val (bg, fg) = palettes[(person.color ?: hash).mod(palettes.size)]
     val shape = shapes[(hash / palettes.size) % shapes.size].toShape()
     return AvatarStyle(bg, fg, shape)
 }
@@ -306,9 +325,9 @@ fun PersonChip(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.widthIn(max = 140.dp)
                 )
-                if (!person.note.isNullOrBlank()) {
+                person.mainLabel?.let { mainLabel ->
                     Text(
-                        text = person.note.orEmpty(),
+                        text = mainLabel,
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
@@ -903,11 +922,13 @@ fun PersonDetailSheet(
     var name by remember(person.id) { mutableStateOf(person.name) }
     var note by remember(person.id) { mutableStateOf(person.note.orEmpty()) }
     var lookupKey by remember(person.id) { mutableStateOf(person.contactLookupKey) }
+    var color by remember(person.id) { mutableStateOf(person.color) }
 
     val draft = person.copy(
         name = name.trim().ifEmpty { person.name },
         note = note.trim().ifEmpty { null },
-        contactLookupKey = lookupKey
+        contactLookupKey = lookupKey,
+        color = color
     )
 
     val pickContact = rememberContactPicker { picked ->
@@ -943,6 +964,22 @@ fun PersonDetailSheet(
         R.string.people_note_colleague,
         R.string.people_note_new,
     ).map { stringResource(it) }
+    // Their own labels, then the ones other people have, then the standard ones.
+    val labelChoices = remember(everyone, person.id, quickNotes) {
+        PersonLabels.suggestions(person.note, everyone.filterNot { it.id == person.id }.distinctBy { it.id }, quickNotes)
+    }
+    val labels = PersonLabels.of(note)
+    val haptics = LocalHapticFeedback.current
+    var addingLabel by remember { mutableStateOf(false) }
+    var newLabel by remember { mutableStateOf("") }
+    val newLabelFocus = remember { FocusRequester() }
+    fun addNewLabel() {
+        if (newLabel.isNotBlank() && labels.none { it.equals(newLabel.trim(), ignoreCase = true) }) {
+            note = PersonLabels.toggle(note, newLabel)
+        }
+        newLabel = ""
+        addingLabel = false
+    }
 
     ModalBottomSheet(
         onDismissRequest = { if (draft != person) onSave(draft); onDismiss() },
@@ -969,14 +1006,16 @@ fun PersonDetailSheet(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            AnimatedVisibility(visible = draft.note != null) {
+            AnimatedVisibility(visible = draft.mainLabel != null) {
                 Text(
-                    draft.note.orEmpty(),
+                    draft.mainLabel.orEmpty(),
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            Spacer(Modifier.height(20.dp))
+            Spacer(Modifier.height(12.dp))
+            PersonColorDots(picked = color, onPick = { color = it })
+            Spacer(Modifier.height(16.dp))
 
             val fieldColors = TextFieldDefaults.colors(
                 focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -994,36 +1033,79 @@ fun PersonDetailSheet(
                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words),
                 modifier = Modifier.fillMaxWidth()
             )
-            Spacer(Modifier.height(10.dp))
-            TextField(
-                value = note,
-                onValueChange = { note = it.take(80) },
-                label = { Text(stringResource(R.string.people_note)) },
-                placeholder = { Text(stringResource(R.string.people_note_placeholder)) },
-                supportingText = if (hasNamesake && note.isBlank()) {
-                    { Text(stringResource(R.string.people_namesake_hint, draft.name)) }
-                } else null,
-                singleLine = true,
-                shape = RoundedCornerShape(20.dp),
-                colors = fieldColors,
-                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
-                modifier = Modifier.fillMaxWidth()
+            Spacer(Modifier.height(14.dp))
+            Text(
+                text = if (hasNamesake && labels.isEmpty()) stringResource(R.string.people_namesake_hint, draft.name)
+                else stringResource(R.string.people_note),
+                style = MaterialTheme.typography.labelMedium,
+                color = if (hasNamesake && labels.isEmpty()) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 8.dp, bottom = 6.dp)
             )
-            Spacer(Modifier.height(8.dp))
             FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 4.dp)
             ) {
-                quickNotes.forEach { q ->
-                    FilterChip(
-                        selected = note.equals(q, ignoreCase = true),
-                        onClick = { note = if (note.equals(q, ignoreCase = true)) "" else q },
-                        label = { Text(q) },
-                        shape = RoundedCornerShape(10.dp)
+                // The labels this person has come first, the main one in front and filled.
+                // Tap puts a label on or off; hold one to make it the main label.
+                (labels + labelChoices).distinctBy { it.lowercase() }.take(labels.size + 8).forEach { label ->
+                    val on = labels.any { it.equals(label, ignoreCase = true) }
+                    PersonLabelChip(
+                        label = label,
+                        on = on,
+                        main = on && labels.first().equals(label, ignoreCase = true),
+                        onToggle = { note = PersonLabels.toggle(note, label) },
+                        onMakeMain = {
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            note = PersonLabels.makeMain(note, label)
+                        }
                     )
                 }
+                if (!addingLabel) {
+                    PersonLabelChip(
+                        label = stringResource(R.string.people_label_new),
+                        on = false,
+                        main = false,
+                        leadingAdd = true,
+                        onToggle = { addingLabel = true },
+                        onMakeMain = null
+                    )
+                }
+            }
+            AnimatedVisibility(visible = addingLabel) {
+                LaunchedEffect(Unit) { newLabelFocus.requestFocus() }
+                TextField(
+                    value = newLabel,
+                    onValueChange = { newLabel = it.replace("·", "").take(PersonLabels.MAX_LENGTH) },
+                    placeholder = { Text(stringResource(R.string.people_label_new_hint)) },
+                    singleLine = true,
+                    shape = RoundedCornerShape(20.dp),
+                    colors = fieldColors,
+                    keyboardOptions = KeyboardOptions(
+                        capitalization = KeyboardCapitalization.Sentences,
+                        imeAction = ImeAction.Done
+                    ),
+                    keyboardActions = KeyboardActions(onDone = { addNewLabel() }),
+                    trailingIcon = {
+                        IconButton(onClick = ::addNewLabel) {
+                            Icon(
+                                painterResource(if (newLabel.isBlank()) R.drawable.close_24px else R.drawable.check_24px),
+                                contentDescription = stringResource(
+                                    if (newLabel.isBlank()) R.string.action_cancel else R.string.people_label_add
+                                )
+                            )
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp)
+                        .focusRequester(newLabelFocus)
+                )
             }
 
             Spacer(Modifier.height(16.dp))
@@ -1074,6 +1156,111 @@ fun PersonDetailSheet(
                 }
             }
         }
+    }
+}
+
+/**
+ * The colour of a person, as a row of small dots. Tapping the picked one again gives the choice
+ * back to June.
+ */
+@Composable
+private fun PersonColorDots(picked: Int?, onPick: (Int?) -> Unit) {
+    val colors = personColors()
+    val ring = MaterialTheme.colorScheme.onSurface
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        modifier = Modifier.selectableGroup()
+    ) {
+        colors.forEachIndexed { index, (background, _) ->
+            val isPicked = picked == index
+            val label = stringResource(R.string.people_color_n, index + 1)
+            // a small dot in a touch target of its own
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .selectable(
+                        selected = isPicked,
+                        role = Role.RadioButton,
+                        onClick = { onPick(if (isPicked) null else index) }
+                    )
+                    .semantics { contentDescription = label }
+            ) {
+                Box(
+                    Modifier
+                        .size(if (isPicked) 26.dp else 20.dp)
+                        .then(if (isPicked) Modifier.border(2.dp, ring, CircleShape).padding(4.dp) else Modifier)
+                        .clip(CircleShape)
+                        .background(background)
+                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape)
+                )
+            }
+        }
+    }
+}
+
+/**
+ * One of a person's labels, small. Filled when it is the main label, tinted when it is on.
+ * Tap puts it on or off; holding it makes it the main label.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun PersonLabelChip(
+    label: String,
+    on: Boolean,
+    main: Boolean,
+    onToggle: () -> Unit,
+    onMakeMain: (() -> Unit)?,
+    leadingAdd: Boolean = false,
+) {
+    val scheme = MaterialTheme.colorScheme
+    val container = when {
+        main -> scheme.primary
+        on -> scheme.secondaryContainer
+        else -> Color.Transparent
+    }
+    val content = when {
+        main -> scheme.onPrimary
+        on -> scheme.onSecondaryContainer
+        else -> scheme.onSurfaceVariant
+    }
+    val makeMainLabel = stringResource(R.string.people_label_make_main)
+    val mainState = stringResource(R.string.people_label_main)
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .heightIn(min = 32.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(container)
+            .then(
+                if (on) Modifier
+                else Modifier.border(1.dp, scheme.outlineVariant, RoundedCornerShape(10.dp))
+            )
+            .combinedClickable(
+                role = Role.Checkbox,
+                onClick = onToggle,
+                onLongClick = onMakeMain,
+                onLongClickLabel = if (onMakeMain != null) makeMainLabel else null
+            )
+            .semantics {
+                if (!leadingAdd) selected = on
+                if (main) stateDescription = mainState
+            }
+            .padding(horizontal = 12.dp)
+    ) {
+        if (leadingAdd) {
+            Icon(painterResource(R.drawable.add_24px), contentDescription = null, tint = content, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(4.dp))
+        }
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelLarge,
+            color = content,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.widthIn(max = 200.dp)
+        )
     }
 }
 

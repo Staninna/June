@@ -602,7 +602,7 @@ private fun WhoIsMeant(choice: NameChoice, picked: String?, onPick: (String?) ->
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 choice.candidates.forEach { candidate ->
-                    val person = JournalPerson(id = candidate.id, name = candidate.name, note = candidate.note)
+                    val person = JournalPerson(id = candidate.id, name = candidate.name, note = candidate.note, color = candidate.color)
                     FilterChip(
                         selected = picked == candidate.id,
                         onClick = { onPick(candidate.id) },

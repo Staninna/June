@@ -194,7 +194,7 @@ class EditorVM(
         cleanupSession.start(cleanupKey, canOpenEntry = _state.value.journalId != null, body = body) {
             // the people on this entry first: a name several people share most likely means them
             (entryPeople + journalRepo.getKnownPeople().first()).distinctPeople().map { person ->
-                CleanupPerson(person.id, person.name, person.note, onEntry = entryPeople.any { it.id == person.id })
+                CleanupPerson(person.id, person.name, person.note, onEntry = entryPeople.any { it.id == person.id }, color = person.color)
             }
         }
     }

@@ -253,6 +253,8 @@ data class CleanupPerson(
     val note: String? = null,
     /** This person is on the entry that is being cleaned up. */
     val onEntry: Boolean = false,
+    /** The person's colour, only so they look the same when the user is asked who was meant. */
+    val color: Int? = null,
 )
 
 /**
