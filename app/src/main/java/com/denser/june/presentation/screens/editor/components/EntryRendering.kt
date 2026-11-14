@@ -138,7 +138,7 @@ class RenderedReview(val original: RenderedEntry, val rewrite: RenderedEntry, va
         fun of(original: String, rewrite: String): RenderedReview {
             val before = renderEntry(original)
             val after = renderEntry(rewrite)
-            return RenderedReview(before, after, TextDiff.diff(before.text, after.text))
+            return RenderedReview(before, after, TextDiff.readable(TextDiff.diff(before.text, after.text)))
         }
     }
 }
@@ -163,14 +163,15 @@ fun AnnotatedString.Builder.appendReview(
                 if (view == ReviewView.Original) appendRendered(review.original, inOriginal, inOriginal + seg.oldText.length, styles)
                 else appendRendered(review.rewrite, inRewrite, inRewrite + seg.text.length, styles)
             // White space that came or went is laid out, never marked: a struck-through blank
-            // reads as a stray dash, and a removed one has nothing to show in Changes.
+            // reads as a stray dash, and a removed one has nothing to show in Changes. Neither has
+            // a name that only became a link: the link shows as added, the plain name not at all.
             TextDiff.Op.Added ->
                 if (view != ReviewView.Original) {
                     val mark = added.takeIf { view == ReviewView.Changes && seg.text.isNotBlank() }
                     appendRendered(review.rewrite, inRewrite, inRewrite + seg.text.length, styles, mark)
                 }
             TextDiff.Op.Removed ->
-                if (view == ReviewView.Original || (view == ReviewView.Changes && seg.oldText.isNotBlank())) {
+                if (view == ReviewView.Original || (view == ReviewView.Changes && !seg.quiet && seg.oldText.isNotBlank())) {
                     appendRendered(review.original, inOriginal, inOriginal + seg.oldText.length, styles, removed.takeIf { view == ReviewView.Changes })
                 }
         }

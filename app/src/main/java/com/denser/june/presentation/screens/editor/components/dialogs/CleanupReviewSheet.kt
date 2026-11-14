@@ -79,7 +79,10 @@ import com.denser.june.core.R
 import com.denser.june.core.localai.TextDiff
 import com.denser.june.presentation.components.JuneFloatingAction
 import com.denser.june.presentation.components.JuneFloatingActionBar
-import com.denser.june.presentation.components.JuneSelectableTabChip
+import com.denser.june.presentation.components.JuneConnectedButtonGroup
+import androidx.compose.material3.ButtonGroupDefaults
+import androidx.compose.material3.ToggleButtonDefaults
+import androidx.compose.ui.res.pluralStringResource
 import com.denser.june.presentation.screens.editor.CleanupUiState
 import com.denser.june.presentation.screens.editor.components.RenderedReview
 import com.denser.june.presentation.screens.editor.components.ReviewView
@@ -92,6 +95,9 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontFamily
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+
+/** A link to a person or topic in Markdown: its shown name and its kind. */
+private val MARKDOWN_LINK = Regex("""\[([@#][^\]]*)]\((person|topic):[^)]*\)""")
 
 /**
  * Bottom sheet for "Clean up dictation": progress, a friendly problem state, or a review of the
@@ -363,6 +369,7 @@ private fun ProblemContent(
     }
 }
 
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun ReviewContent(
     state: CleanupUiState.Review,
@@ -400,13 +407,10 @@ private fun ReviewContent(
         )
     }
     val scheme = MaterialTheme.colorScheme
-    val added = SpanStyle(background = scheme.primaryContainer, color = scheme.onPrimaryContainer)
-    val removed =
-        SpanStyle(
-            background = scheme.errorContainer.copy(alpha = 0.7f),
-            color = scheme.onErrorContainer,
-            textDecoration = TextDecoration.LineThrough,
-        )
+    // Marked by colour and line, like suggestions in a document. A filled background would sit
+    // off the line and box in single marks like a colon.
+    val added = SpanStyle(color = scheme.primary, textDecoration = TextDecoration.Underline)
+    val removed = SpanStyle(color = scheme.error.copy(alpha = 0.75f), textDecoration = TextDecoration.LineThrough)
     val entryStyles = juneEntryStyleConfig()
 
     // Parsing and comparing a long entry takes a moment: not on the frame that opens the sheet.
@@ -415,6 +419,7 @@ private fun ReviewContent(
             value = withContext(Dispatchers.Default) { RenderedReview.of(state.original, state.rewrite) }
         }
     val shown = review.takeIf { formatted }
+    val changeCount = remember(shown, state.segments) { TextDiff.changeCount(shown?.segments ?: state.segments) }
 
     val text: AnnotatedString =
         remember(state, tab, scheme, shown, entryStyles) {
@@ -422,18 +427,31 @@ private fun ReviewContent(
                 if (shown != null) {
                     appendReview(shown, tab, entryStyles, added, removed)
                 } else {
-                    // the Markdown exactly as it is stored: no part of it is prettied up
+                    // The Markdown as it is stored, but a link to a person or topic shows as its
+                    // name: the id behind it means nothing to read.
+                    fun appendMarkdown(part: String, overlay: SpanStyle?) {
+                        val from = length
+                        var last = 0
+                        for (link in MARKDOWN_LINK.findAll(part)) {
+                            append(part, last, link.range.first)
+                            val name = link.groupValues[1]
+                            val style = entryStyles.mentionStyles[link.groupValues[2]] ?: entryStyles.mentionStyle
+                            withStyle(style) { append(name) }
+                            last = link.range.last + 1
+                        }
+                        append(part, last, part.length)
+                        if (overlay != null && length > from) addStyle(overlay, from, length)
+                    }
                     for (seg in state.segments) {
                         when (seg.op) {
-                            TextDiff.Op.Equal -> append(if (tab == ReviewView.Original) seg.oldText else seg.text)
+                            TextDiff.Op.Equal -> appendMarkdown(if (tab == ReviewView.Original) seg.oldText else seg.text, null)
                             TextDiff.Op.Added ->
                                 if (tab != ReviewView.Original) {
-                                    if (tab == ReviewView.Changes && seg.text.isNotBlank()) withStyle(added) { append(seg.text) }
-                                    else append(seg.text)
+                                    appendMarkdown(seg.text, added.takeIf { tab == ReviewView.Changes && seg.text.isNotBlank() })
                                 }
                             TextDiff.Op.Removed ->
-                                if (tab == ReviewView.Original) append(seg.oldText)
-                                else if (tab == ReviewView.Changes && seg.oldText.isNotBlank()) withStyle(removed) { append(seg.oldText) }
+                                if (tab == ReviewView.Original) appendMarkdown(seg.oldText, null)
+                                else if (tab == ReviewView.Changes && !seg.quiet && seg.oldText.isNotBlank()) appendMarkdown(seg.oldText, removed)
                         }
                     }
                 }
@@ -443,51 +461,28 @@ private fun ReviewContent(
     // The text is the one part that gives way: it takes the room that is left and scrolls, so
     // the tabs above it and the buttons below it are always on screen, whatever else is shown.
     Column(Modifier.fillMaxWidth()) {
-        Column(Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(
-                stringResource(R.string.cleanup_review_title),
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.semantics { heading() },
-            )
-            if (edits == EditedMeanwhile.Changed) {
-                Spacer(Modifier.height(12.dp))
-                Surface(
-                    shape = RoundedCornerShape(16.dp),
-                    color = scheme.errorContainer,
-                    contentColor = scheme.onErrorContainer,
-                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
-                ) {
+        Row(
+            Modifier.fillMaxWidth().padding(top = 20.dp, bottom = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    stringResource(R.string.cleanup_review_title),
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.semantics { heading() },
+                )
+                Spacer(Modifier.height(2.dp))
+                AnimatedContent(changeCount, transitionSpec = { fadeIn() togetherWith fadeOut() }, label = "count") { count ->
                     Text(
-                        stringResource(R.string.cleanup_changed),
+                        if (count == 0) stringResource(R.string.cleanup_no_changes)
+                        else pluralStringResource(R.plurals.cleanup_change_count, count, count),
                         style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                        color = scheme.onSurfaceVariant,
                     )
                 }
             }
-        }
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Row(
-                Modifier.weight(1f).horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                ReviewView.entries.forEach { t ->
-                    JuneSelectableTabChip(
-                        item = t,
-                        label =
-                            stringResource(
-                                when (t) {
-                                    ReviewView.Changes -> R.string.cleanup_tab_changes
-                                    ReviewView.Original -> R.string.cleanup_tab_original
-                                    ReviewView.Rewrite -> R.string.cleanup_tab_rewrite
-                                }
-                            ),
-                        isSelected = tab == t,
-                        onSelect = { tab = it },
-                    )
-                }
-            }
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(12.dp))
             // As in the entry, or the Markdown behind it. The icon shows what a tap switches to.
             val switchLabel = stringResource(if (formatted) R.string.cleanup_view_markdown else R.string.cleanup_view_formatted)
             FilledTonalIconToggleButton(
@@ -502,6 +497,44 @@ private fun ReviewContent(
                 )
             }
         }
+        if (edits == EditedMeanwhile.Changed) {
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = scheme.errorContainer,
+                contentColor = scheme.onErrorContainer,
+                modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp).semantics { liveRegion = LiveRegionMode.Polite },
+            ) {
+                Text(
+                    stringResource(R.string.cleanup_changed),
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                )
+            }
+        }
+        JuneConnectedButtonGroup(
+            options = ReviewView.entries,
+            selected = { it == tab },
+            onSelect = { tab = it },
+            label = { t ->
+                stringResource(
+                    when (t) {
+                        ReviewView.Changes -> R.string.cleanup_tab_changes
+                        ReviewView.Original -> R.string.cleanup_tab_original
+                        ReviewView.Rewrite -> R.string.cleanup_tab_rewrite
+                    }
+                )
+            },
+            modifier = Modifier.fillMaxWidth(),
+            equalWeight = true,
+            animateWidthOnPress = false,
+            horizontalArrangement = Arrangement.spacedBy(ButtonGroupDefaults.ConnectedSpaceBetween),
+            colors = ToggleButtonDefaults.toggleButtonColors(
+                containerColor = scheme.surfaceContainerHigh,
+                contentColor = scheme.onSurfaceVariant,
+                checkedContainerColor = scheme.secondaryContainer,
+                checkedContentColor = scheme.onSecondaryContainer,
+            ),
+        )
         Spacer(Modifier.height(12.dp))
         Surface(
             shape = RoundedCornerShape(24.dp),
@@ -516,12 +549,15 @@ private fun ReviewContent(
                             // the entry's own font and text colour, as the editor uses them
                             MaterialTheme.typography.bodyLarge.copy(
                                 fontFamily = fontFamily ?: MaterialTheme.typography.bodyLarge.fontFamily,
-                                color = scheme.onSurface.copy(alpha = 0.8f),
+                                color = scheme.onSurface.copy(alpha = 0.87f),
                             )
                         } else {
-                            MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace)
+                            MaterialTheme.typography.bodyMedium.copy(
+                                fontFamily = FontFamily.Monospace,
+                                color = scheme.onSurface.copy(alpha = 0.87f),
+                            )
                         },
-                    modifier = Modifier.verticalScroll(rememberScrollState()).padding(20.dp),
+                    modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 18.dp),
                 )
             }
         }
@@ -561,13 +597,25 @@ private fun ReviewContent(
             }
         }
         if (state.changes.isNotEmpty()) {
-            Spacer(Modifier.height(8.dp))
-            Text(
-                state.changes.joinToString(" · ").replaceFirstChar { it.uppercase() },
-                style = MaterialTheme.typography.labelMedium,
-                color = scheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 8.dp),
-            )
+            // what the cleanup did besides the text itself, such as linking names to People
+            Spacer(Modifier.height(12.dp))
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 8.dp).semantics(mergeDescendants = true) {},
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    painterResource(R.drawable.auto_awesome_24px),
+                    contentDescription = null,
+                    tint = scheme.primary,
+                    modifier = Modifier.size(16.dp),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    state.changes.joinToString(" · ").replaceFirstChar { it.uppercase() },
+                    style = MaterialTheme.typography.labelLarge,
+                    color = scheme.onSurfaceVariant,
+                )
+            }
         }
         Spacer(Modifier.height(20.dp))
         JuneFloatingActionBar(Modifier.align(Alignment.CenterHorizontally)) {

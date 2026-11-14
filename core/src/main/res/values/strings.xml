@@ -815,6 +815,11 @@
     <string name="cleanup_stopped_title">The cleanup was stopped</string>
     <string name="cleanup_stopped_desc">It was stopped in the server app, or the server was restarted. Try again.</string>
     <string name="cleanup_review_title">Review cleanup</string>
+    <string name="cleanup_no_changes">Nothing to change</string>
+    <plurals name="cleanup_change_count">
+        <item quantity="one">%1$d change</item>
+        <item quantity="other">%1$d changes</item>
+    </plurals>
     <string name="cleanup_tab_changes">Changes</string>
     <string name="cleanup_tab_original">Original</string>
     <string name="cleanup_tab_rewrite">Rewrite</string>
