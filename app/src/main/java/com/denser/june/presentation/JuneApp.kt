@@ -34,6 +34,7 @@ import kotlinx.serialization.json.Json
 import org.koin.compose.koinInject
 import com.denser.june.core.domain.repository.JournalRepository
 import com.denser.june.presentation.screens.editor.components.people.LocalPeople
+import com.denser.june.presentation.screens.editor.components.people.ProvidePersonColors
 import com.denser.june.core.domain.billing.BillingHandler
 import com.denser.june.presentation.plus.JunePlusPaywallScreen
 import com.denser.june.presentation.plus.LocalIsPlus
@@ -152,6 +153,8 @@ fun JuneApp(
         LocalPlusSheetController provides plusSheetController
     ) {
         JuneTheme(appTheme = appState.appTheme) {
+            // people keep the app's colours, also inside an entry that has a theme of its own
+            ProvidePersonColors {
             Box(modifier = Modifier.fillMaxSize()) {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     JuneNavHost(
@@ -212,6 +215,7 @@ fun JuneApp(
                         }
                     }
                 )
+            }
             }
         }
     }

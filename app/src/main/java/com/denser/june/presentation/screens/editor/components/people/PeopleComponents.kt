@@ -81,6 +81,9 @@ import com.denser.june.core.domain.model.JournalPerson
 import com.denser.june.core.domain.model.PersonLabels
 import com.denser.june.core.domain.model.PersonIcon
 import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.material3.ColorScheme
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
@@ -122,11 +125,18 @@ val LocalPeople = compositionLocalOf<Map<String, JournalPerson>> { emptyMap() }
 @Composable
 fun JournalPerson.asKnown(): JournalPerson = LocalPeople.current[id] ?: this
 
-/** The colours a person can have: background and what is drawn on it. They follow the theme. */
+/**
+ * The colours a person can have: background and what is drawn on it. They are the app's colours,
+ * fixed at the top of the app ([ProvidePersonColors]). An entry can have a colour theme of its
+ * own, and a person must not change colour because of the entry they happen to be shown on.
+ */
 @Composable
-fun personColors(): List<Pair<Color, Color>> {
-    val c = MaterialTheme.colorScheme
-    return listOf(
+fun personColors(): List<Pair<Color, Color>> = LocalPersonColors.current ?: personColorsOf(MaterialTheme.colorScheme)
+
+private val LocalPersonColors = staticCompositionLocalOf<List<Pair<Color, Color>>?> { null }
+
+private fun personColorsOf(c: ColorScheme): List<Pair<Color, Color>> =
+    listOf(
         c.primaryContainer to c.onPrimaryContainer,
         c.secondaryContainer to c.onSecondaryContainer,
         c.tertiaryContainer to c.onTertiaryContainer,
@@ -134,6 +144,12 @@ fun personColors(): List<Pair<Color, Color>> {
         c.tertiary to c.onTertiary,
         c.inversePrimary to c.onSurface,
     )
+
+/** Takes the person colours from the theme in force here, the app's, for everything inside. */
+@Composable
+fun ProvidePersonColors(content: @Composable () -> Unit) {
+    val colors = personColorsOf(MaterialTheme.colorScheme)
+    CompositionLocalProvider(LocalPersonColors provides colors, content = content)
 }
 
 /** The shapes a person's icon can have. */
