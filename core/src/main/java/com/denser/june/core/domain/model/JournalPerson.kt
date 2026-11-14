@@ -1,5 +1,7 @@
 package com.denser.june.core.domain.model
 
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 import java.util.UUID
 
@@ -22,6 +24,18 @@ data class JournalPerson(
     val note: String? = null,
     /** ContactsContract lookup key, when linked to a device contact. */
     val contactLookupKey: String? = null,
+    /**
+     * The colour picked for this person, as a place in the app's set of person colours, or null
+     * to let June choose. Left out when null, so entries written before this read and compare
+     * the same.
+     */
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val color: Int? = null,
+    /** The shape picked for this person's icon, as a place in the app's set of shapes, or null. */
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val shape: Int? = null,
 ) {
     val initials: String
         get() = name.trim()
@@ -36,6 +50,13 @@ data class JournalPerson(
             }
             .uppercase()
 
+    /**
+     * What a person's icon follows from when no colour or shape was picked: their contact, or
+     * else their name. It is what icons have always followed from, so they look as they did.
+     */
+    val iconSeed: String
+        get() = contactLookupKey?.let { "contact:$it" } ?: "name:${name.trim().lowercase()}"
+
     /** What makes this person this person: the id. Never the name. */
     val identityKey: String
         get() = id
@@ -48,9 +69,13 @@ data class JournalPerson(
     val label: String
         get() = PERSON_PREFIX + name.trim()
 
-    /** Name with the context that tells namesakes apart: "Bart · Work". */
+    /** The one label that says who this is where there is little room: the first of [note]'s. */
+    val mainLabel: String?
+        get() = PersonLabels.main(note)
+
+    /** Name with the label that tells namesakes apart: "Bart · Work". */
     val displayName: String
-        get() = note?.trim()?.takeIf { it.isNotEmpty() }?.let { "${name.trim()} · $it" } ?: name.trim()
+        get() = mainLabel?.let { "${name.trim()} · $it" } ?: name.trim()
 
     /**
      * Known by name only, not yet matched to a person: from a `@name` tag or an imported file.
@@ -163,3 +188,54 @@ private val MENTION_OF = Regex("""\[@?[^\[\]]*\]\(\s*person\s*:\s*([^()\n]+?)\s*
 /** Rewrites the mentions of [person] in [content] so they show the person's current name. */
 fun renameMentions(content: String, person: JournalPerson): String =
     MENTION_OF.replace(content) { m -> if (m.groupValues[1] == person.id) person.mentionCode() else m.value }
+
+/**
+ * A person's context is a handful of short labels: "Friend", "Climbing", "Work". The first one is
+ * the main label: the only one shown on small chips, so they stay small. The others are there in
+ * a person's details and wherever there is room.
+ *
+ * They are kept in [JournalPerson.note], separated by [PersonLabels.SEPARATOR], so older notes
+ * and synced copies read the same: a note without the separator is simply one label.
+ */
+object PersonLabels {
+    const val SEPARATOR = " · "
+    const val MAX_LENGTH = 24
+
+    /** The labels in [note], in order, without blanks or repeats. */
+    fun of(note: String?): List<String> =
+        note.orEmpty().split("·").map { it.trim() }.filter { it.isNotEmpty() }.distinctBy { it.lowercase() }
+
+    fun join(labels: List<String>): String = labels.joinToString(SEPARATOR)
+
+    /** The main label: the first one. */
+    fun main(note: String?): String? = of(note).firstOrNull()
+
+    /** [note] with [label] as its main label, added if it was not on it. */
+    fun makeMain(note: String?, label: String): String {
+        val clean = label.replace("·", " ").trim()
+        if (clean.isEmpty()) return note.orEmpty()
+        val labels = of(note)
+        // a label that is on already keeps the spelling it has
+        val main = labels.firstOrNull { it.equals(clean, ignoreCase = true) } ?: clean
+        return join(listOf(main) + labels.filterNot { it.equals(clean, ignoreCase = true) })
+    }
+
+    /** [note] with [label] added when it is not on it, and taken off when it is. */
+    fun toggle(note: String?, label: String): String {
+        val clean = label.replace("·", " ").trim()
+        if (clean.isEmpty()) return note.orEmpty()
+        val labels = of(note)
+        return join(if (labels.any { it.equals(clean, ignoreCase = true) }) labels.filterNot { it.equals(clean, ignoreCase = true) } else labels + clean)
+    }
+
+    /**
+     * The labels to offer for a person: the ones they have, the ones other [people] have (most
+     * used first), then the [defaults]. A label made for one person is there for the next.
+     */
+    fun suggestions(note: String?, people: List<JournalPerson>, defaults: List<String>, limit: Int = 24): List<String> {
+        val used = people.flatMap { of(it.note) }.filter { it.length <= MAX_LENGTH }
+        val byUse = used.groupingBy { it.lowercase() }.eachCount()
+        val others = used.distinctBy { it.lowercase() }.sortedByDescending { byUse[it.lowercase()] }
+        return (of(note) + others + defaults).distinctBy { it.lowercase() }.take(maxOf(limit, of(note).size))
+    }
+}

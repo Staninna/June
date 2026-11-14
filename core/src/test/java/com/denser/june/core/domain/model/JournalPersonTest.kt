@@ -150,4 +150,62 @@ class JournalPersonTest {
         val parsed = MarkdownEngine.fromMarkdown(md)
         assertEquals(listOf("Anna", "Tom"), parsed.people.map { it.name })
     }
+
+    @Test
+    fun `a person has several labels, kept in the note`() {
+        assertEquals(listOf("Friend", "Climbing"), PersonLabels.of("Friend · Climbing"))
+        assertEquals(listOf("Sister"), PersonLabels.of("Sister"))
+        assertTrue(PersonLabels.of(null).isEmpty())
+        assertEquals(listOf("Acme", "Engineer"), PersonLabels.of(" Acme ·Engineer · acme "))
+    }
+
+    @Test
+    fun `a label is added when it is not there and taken off when it is`() {
+        assertEquals("Friend", PersonLabels.toggle(null, "Friend"))
+        assertEquals("Friend · Work", PersonLabels.toggle("Friend", " Work "))
+        assertEquals("Work", PersonLabels.toggle("Friend · Work", "friend"))
+        assertEquals("", PersonLabels.toggle("Friend", "Friend"))
+        assertEquals("Friend", PersonLabels.toggle("Friend", "  "))
+    }
+
+    @Test
+    fun `labels made for one person are offered for the next`() {
+        val people = listOf(
+            JournalPerson(name = "Anna", note = "Climbing · Friend"),
+            JournalPerson(name = "Tom", note = "Climbing"),
+            JournalPerson(name = "Kim", note = "A whole sentence about where we met, too long to be a label"),
+        )
+        assertEquals(
+            listOf("Work", "Climbing", "Friend", "Family"),
+            PersonLabels.suggestions("Work", people, defaults = listOf("Family", "friend")),
+        )
+    }
+
+    @Test
+    fun `the first label is the main one, and the only one in a short name`() {
+        val bart = JournalPerson(name = "Bart", note = "Work · Climbing · Friend")
+        assertEquals("Work", bart.mainLabel)
+        assertEquals("Bart · Work", bart.displayName)
+        assertEquals("Climbing · Work · Friend", PersonLabels.makeMain(bart.note, "climbing"))
+        assertEquals("Family · Work", PersonLabels.makeMain("Work", "Family"))
+        // taking the main label off makes the next one main
+        assertEquals("Climbing", PersonLabels.main(PersonLabels.toggle("Work · Climbing", "Work")))
+    }
+
+    @Test
+    fun `a person without a picked colour is stored as before`() {
+        val json = Json { encodeDefaults = true; explicitNulls = true }
+        val plain = json.encodeToString(JournalPerson.serializer(), JournalPerson(id = "p", name = "Anna"))
+        assertFalse(plain.contains("color"))
+        assertFalse(plain.contains("shape"))
+        val coloured = JournalPerson(id = "p", name = "Anna", color = 3, shape = 5)
+        assertEquals(coloured, json.decodeFromString(JournalPerson.serializer(), json.encodeToString(JournalPerson.serializer(), coloured)))
+    }
+
+    @Test
+    fun `an icon follows from the contact or the name, not from the id`() {
+        assertEquals("name:anna", JournalPerson(id = "1", name = " Anna ").iconSeed)
+        assertEquals(JournalPerson(id = "1", name = "Anna").iconSeed, JournalPerson(id = "2", name = "anna").iconSeed)
+        assertEquals("contact:k", JournalPerson(name = "Anna", contactLookupKey = "k").iconSeed)
+    }
 }
