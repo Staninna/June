@@ -70,7 +70,7 @@ class CleanupSession(private val cleanup: DictationCleanup) {
                             CleanupUiState.Review(
                                 original = outcome.original,
                                 rewrite = outcome.rewrite,
-                                segments = withContext(Dispatchers.Default) { TextDiff.diff(outcome.original, outcome.rewrite) },
+                                segments = withContext(Dispatchers.Default) { TextDiff.readable(TextDiff.diff(outcome.original, outcome.rewrite)) },
                                 changes = outcome.changes,
                                 choices = outcome.choices,
                                 // a suggestion starts out picked; it is shown, so it is still the user's call
