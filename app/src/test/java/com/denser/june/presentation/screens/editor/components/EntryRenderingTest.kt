@@ -73,4 +73,13 @@ class EntryRenderingTest {
         assertEquals("Went out with @Emma.\n\n#carnaval", changes.text)
         assertTrue(changes.spanStyles.none { it.item == added || it.item == removed })
     }
+
+    @Test
+    fun `a replaced word and its replacement are not glued together`() {
+        val review = RenderedReview.of(original = "Sunday. ate a kapsalon at 22 30", rewrite = "Sunday. Ate a kapsalon at 22:30.")
+        val changes = show(review, ReviewView.Changes)
+        assertEquals("Sunday. ate Ate a kapsalon at 22 30 22:30.", changes.text)
+        // the gap is only in Changes
+        assertEquals("Sunday. Ate a kapsalon at 22:30.", show(review, ReviewView.Rewrite).text)
+    }
 }
