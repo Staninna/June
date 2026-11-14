@@ -76,7 +76,8 @@ class TextDiffTest {
     @Test
     fun `a name that only became a link shows as the link alone`() {
         assertEquals("with {+[@Emma](person:e1)} and", shown(readable("with Emma and", "with [@Emma](person:e1) and")))
-        assertEquals("in {+[@Emma](person:e1)'s} bag", shown(readable("in Emma's bag", "in [@Emma](person:e1)'s bag")))
+        assertEquals("in {+[@Emma](person:e1)}'s bag", shown(readable("in Emma's bag", "in [@Emma](person:e1)'s bag")))
+        assertEquals("in {+@Emma}'s bag", shown(readable("in Emma's bag", "in @Emma's bag")))
         // as the entry shows it: the name gains an @
         assertEquals("with {+@Emma} and", shown(readable("with Emma and", "with @Emma and")))
     }

@@ -71,6 +71,7 @@ object TextDiff {
 
     private val WORD_START = Regex("""^[\p{L}\p{N}'’_-]+""")
     private val WORD_END = Regex("""[\p{L}\p{N}'’_-]+$""")
+    private val POSSESSIVE = Regex("""['’]\p{L}{0,2}$""")
     private val ANY_LINK = Regex("""\[([@#][^\]]*)]\((?:person|topic):[^)]*\)""")
 
     /**
@@ -166,8 +167,13 @@ object TextDiff {
                     val old = item.old.toString()
                     val new = item.new.toString()
                     val linkedOnly = old.isNotBlank() && new.isNotBlank() && plain(old) == plain(new)
-                    if (old.isNotEmpty()) out += Segment(Op.Removed, old, old, quiet = linkedOnly)
-                    if (new.isNotEmpty()) out += Segment(Op.Added, new)
+                    // "Emma's" to "@Emma's": only the name became a link, the "'s" after it is the same
+                    val ending = POSSESSIVE.find(old)?.value?.takeIf { linkedOnly && new.endsWith(it) && it.length < old.length }.orEmpty()
+                    val oldPart = old.dropLast(ending.length)
+                    val newPart = new.dropLast(ending.length)
+                    if (oldPart.isNotEmpty()) out += Segment(Op.Removed, oldPart, oldPart, quiet = linkedOnly)
+                    if (newPart.isNotEmpty()) out += Segment(Op.Added, newPart)
+                    if (ending.isNotEmpty()) out += Segment(Op.Equal, ending, ending)
                 }
             }
         }
