@@ -103,22 +103,12 @@ fun JournalCard(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.Center
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Text(
-                        text = journal.dateTime.toFullDate(),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = colors.dateColor,
-                        fontWeight = FontWeight.SemiBold
-                    )
-
-                    JuneBadge(
-                        show = journal.isDraft,
-                        icon = R.drawable.edit_24px_fill
-                    )
-                }
+                Text(
+                    text = journal.dateTime.toFullDate(),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = colors.dateColor,
+                    fontWeight = FontWeight.SemiBold
+                )
 
                 Spacer(modifier = Modifier.height(3.dp))
 
@@ -128,6 +118,11 @@ fun JournalCard(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     color = MaterialTheme.colorScheme.onSurface
+                )
+
+                JournalMetadataBadges(
+                    journal = journal,
+                    modifier = Modifier.padding(top = 4.dp)
                 )
             }
 
