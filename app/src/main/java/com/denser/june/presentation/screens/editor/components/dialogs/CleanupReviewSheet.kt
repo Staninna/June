@@ -84,6 +84,7 @@ import androidx.compose.material3.ButtonGroupDefaults
 import androidx.compose.material3.ToggleButtonDefaults
 import androidx.compose.ui.res.pluralStringResource
 import com.denser.june.presentation.screens.editor.CleanupUiState
+import com.denser.june.presentation.screens.editor.components.REPLACEMENT_GAP
 import com.denser.june.presentation.screens.editor.components.RenderedReview
 import com.denser.june.presentation.screens.editor.components.ReviewView
 import com.denser.june.presentation.screens.editor.components.appendReview
@@ -442,7 +443,12 @@ private fun ReviewContent(
                         append(part, last, part.length)
                         if (overlay != null && length > from) addStyle(overlay, from, length)
                     }
+                    var afterRemoved = false
                     for (seg in state.segments) {
+                        if (tab == ReviewView.Changes && afterRemoved && seg.op == TextDiff.Op.Added && seg.text.isNotBlank()) {
+                            append(REPLACEMENT_GAP)
+                        }
+                        afterRemoved = tab == ReviewView.Changes && seg.op == TextDiff.Op.Removed && !seg.quiet && seg.oldText.isNotBlank()
                         when (seg.op) {
                             TextDiff.Op.Equal -> appendMarkdown(if (tab == ReviewView.Original) seg.oldText else seg.text, null)
                             TextDiff.Op.Added ->

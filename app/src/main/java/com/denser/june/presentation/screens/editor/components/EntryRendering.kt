@@ -129,6 +129,9 @@ fun AnnotatedString.Builder.appendRendered(
     if (overlay != null) addStyle(overlay, start + offset, end + offset)
 }
 
+/** Shown between a struck-out part and what replaced it. Only on screen: never in the entry. */
+const val REPLACEMENT_GAP = " "
+
 /** Which text a review shows: the rewrite with the changes marked, or one of the two texts. */
 enum class ReviewView { Changes, Original, Rewrite }
 
@@ -157,7 +160,12 @@ fun AnnotatedString.Builder.appendReview(
 ) {
     var inOriginal = 0
     var inRewrite = 0
+    // what replaced a struck-out part stands a space apart from it, not glued on as one word
+    var afterRemoved = false
     for (seg in review.segments) {
+        val gap = view == ReviewView.Changes && afterRemoved && seg.op == TextDiff.Op.Added && seg.text.isNotBlank()
+        afterRemoved = false
+        if (gap) append(REPLACEMENT_GAP)
         when (seg.op) {
             TextDiff.Op.Equal ->
                 if (view == ReviewView.Original) appendRendered(review.original, inOriginal, inOriginal + seg.oldText.length, styles)
@@ -173,6 +181,7 @@ fun AnnotatedString.Builder.appendReview(
             TextDiff.Op.Removed ->
                 if (view == ReviewView.Original || (view == ReviewView.Changes && !seg.quiet && seg.oldText.isNotBlank())) {
                     appendRendered(review.original, inOriginal, inOriginal + seg.oldText.length, styles, removed.takeIf { view == ReviewView.Changes })
+                    afterRemoved = view == ReviewView.Changes
                 }
         }
         if (seg.op != TextDiff.Op.Added) inOriginal += seg.oldText.length
