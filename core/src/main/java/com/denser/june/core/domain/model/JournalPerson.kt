@@ -239,3 +239,46 @@ object PersonLabels {
         return (of(note) + others + defaults).distinctBy { it.lowercase() }.take(maxOf(limit, of(note).size))
     }
 }
+
+/**
+ * How a person's icon looks: one of [COLORS] colours and one of [SHAPES] shapes. What the user
+ * picked wins. Without a pick the look follows from [JournalPerson.iconSeed], so the same person
+ * looks the same on every screen and every day. Nothing about it is random.
+ */
+object PersonIcon {
+    const val COLORS = 6
+    const val SHAPES = 8
+
+    private fun seed(person: JournalPerson): Int = person.iconSeed.hashCode().let { if (it == Int.MIN_VALUE) 0 else kotlin.math.abs(it) }
+
+    fun colorOf(person: JournalPerson): Int = (person.color ?: seed(person)).mod(COLORS)
+
+    fun shapeOf(person: JournalPerson): Int = (person.shape ?: (seed(person) / COLORS)).mod(SHAPES)
+
+    /**
+     * [after] with the look [before] had. Renaming someone or linking a contact changes what an
+     * unpicked look follows from; the icon people know them by must not change with it.
+     */
+    fun keepLook(before: JournalPerson, after: JournalPerson): JournalPerson =
+        if (before.iconSeed == after.iconSeed) after
+        else after.copy(color = after.color ?: colorOf(before), shape = after.shape ?: shapeOf(before))
+
+    /**
+     * [person] with a look none of [others] has. Namesakes without a contact would otherwise look
+     * exactly alike, and telling them apart is the whole point. Someone who already looks
+     * different is returned as they are.
+     */
+    fun distinctFrom(person: JournalPerson, others: List<JournalPerson>): JournalPerson {
+        val taken = others.filterNot { it.id == person.id }.map { colorOf(it) to shapeOf(it) }.toSet()
+        if ((colorOf(person) to shapeOf(person)) !in taken) return person
+        val color = colorOf(person)
+        val shape = shapeOf(person)
+        // another colour first: it is what the eye picks up; then another shape as well
+        for (step in 1 until COLORS * SHAPES) {
+            val c = (color + step).mod(COLORS)
+            val s = (shape + step / COLORS).mod(SHAPES)
+            if ((c to s) !in taken) return person.copy(color = c, shape = s)
+        }
+        return person
+    }
+}

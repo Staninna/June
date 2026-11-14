@@ -32,6 +32,8 @@ import com.denser.june.presentation.utils.StartupManager
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import org.koin.compose.koinInject
+import com.denser.june.core.domain.repository.JournalRepository
+import com.denser.june.presentation.screens.editor.components.people.LocalPeople
 import com.denser.june.core.domain.billing.BillingHandler
 import com.denser.june.presentation.plus.JunePlusPaywallScreen
 import com.denser.june.presentation.plus.LocalIsPlus
@@ -134,10 +136,17 @@ fun JuneApp(
 
     val uiDirection = if (appState.isForceLtrUi) LayoutDirection.Ltr else LocalLayoutDirection.current
 
+    // Everyone in the journal, so a person looks the same wherever they are shown.
+    val journalRepository = koinInject<JournalRepository>()
+    val knownPeople by remember(journalRepository) { journalRepository.getKnownPeople() }
+        .collectAsStateWithLifecycle(initialValue = emptyList())
+    val people = remember(knownPeople) { knownPeople.associateBy { it.id } }
+
     CompositionLocalProvider(
         LocalAppTheme provides appState.appTheme,
         LocalInternetAllowed provides appState.isInternetAllowed,
         LocalSyncEnabled provides appState.isSyncEnabled,
+        LocalPeople provides people,
         LocalLayoutDirection provides uiDirection,
         LocalIsPlus provides isPlus,
         LocalPlusSheetController provides plusSheetController

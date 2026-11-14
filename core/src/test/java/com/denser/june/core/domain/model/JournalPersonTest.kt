@@ -208,4 +208,40 @@ class JournalPersonTest {
         assertEquals(JournalPerson(id = "1", name = "Anna").iconSeed, JournalPerson(id = "2", name = "anna").iconSeed)
         assertEquals("contact:k", JournalPerson(name = "Anna", contactLookupKey = "k").iconSeed)
     }
+
+    @Test
+    fun `an icon is the same for the same person and follows a pick`() {
+        val anna = JournalPerson(id = "1", name = "Anna")
+        assertEquals(PersonIcon.colorOf(anna), PersonIcon.colorOf(JournalPerson(id = "2", name = "anna")))
+        assertEquals(PersonIcon.shapeOf(anna), PersonIcon.shapeOf(anna.copy(note = "Sister")))
+        assertTrue(PersonIcon.colorOf(anna) in 0 until PersonIcon.COLORS)
+        assertTrue(PersonIcon.shapeOf(anna) in 0 until PersonIcon.SHAPES)
+        assertEquals(4, PersonIcon.colorOf(anna.copy(color = 4)))
+        assertEquals(7, PersonIcon.shapeOf(anna.copy(shape = 7)))
+    }
+
+    @Test
+    fun `renaming or linking someone keeps the icon they had`() {
+        val before = JournalPerson(id = "1", name = "Bart")
+        val renamed = PersonIcon.keepLook(before, before.copy(name = "Bartholomew"))
+        assertEquals(PersonIcon.colorOf(before), PersonIcon.colorOf(renamed))
+        assertEquals(PersonIcon.shapeOf(before), PersonIcon.shapeOf(renamed))
+        val linked = PersonIcon.keepLook(before, before.copy(contactLookupKey = "k"))
+        assertEquals(PersonIcon.colorOf(before) to PersonIcon.shapeOf(before), PersonIcon.colorOf(linked) to PersonIcon.shapeOf(linked))
+        // nothing is pinned when what the look follows from did not change
+        assertEquals(null, PersonIcon.keepLook(before, before.copy(note = "Work")).color)
+    }
+
+    @Test
+    fun `a namesake gets a look of their own`() {
+        val bart = JournalPerson(id = "1", name = "Bart")
+        val second = PersonIcon.distinctFrom(JournalPerson(id = "2", name = "Bart"), listOf(bart))
+        val third = PersonIcon.distinctFrom(JournalPerson(id = "3", name = "Bart"), listOf(bart, second))
+        val looks = listOf(bart, second, third).map { PersonIcon.colorOf(it) to PersonIcon.shapeOf(it) }
+        assertEquals(3, looks.toSet().size)
+        assertEquals(3, listOf(bart, second, third).map { PersonIcon.colorOf(it) }.toSet().size)
+        // someone who already looks different is left alone
+        val emma = JournalPerson(id = "4", name = "Emma", color = (PersonIcon.colorOf(bart) + 1) % PersonIcon.COLORS)
+        assertTrue(emma === PersonIcon.distinctFrom(emma, listOf(bart)))
+    }
 }

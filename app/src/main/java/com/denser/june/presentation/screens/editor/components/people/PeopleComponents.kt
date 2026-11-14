@@ -79,6 +79,8 @@ import androidx.compose.ui.unit.sp
 import com.denser.june.core.R
 import com.denser.june.core.domain.model.JournalPerson
 import com.denser.june.core.domain.model.PersonLabels
+import com.denser.june.core.domain.model.PersonIcon
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
@@ -108,6 +110,17 @@ import kotlin.math.absoluteValue
 // -------------------------------------------------------------------------------------------------
 // Avatar
 // -------------------------------------------------------------------------------------------------
+
+/**
+ * Everyone in the journal as they are now, by id. An entry keeps its own copy of the people on
+ * it; showing a person through this makes them look the same on every entry and every screen:
+ * the name, labels, colour and shape set in one place.
+ */
+val LocalPeople = compositionLocalOf<Map<String, JournalPerson>> { emptyMap() }
+
+/** This person as the journal knows them now, or as given when it does not (yet). */
+@Composable
+fun JournalPerson.asKnown(): JournalPerson = LocalPeople.current[id] ?: this
 
 /** The colours a person can have: background and what is drawn on it. They follow the theme. */
 @Composable
@@ -146,10 +159,9 @@ private data class AvatarStyle(val container: Color, val content: Color, val sha
 private fun avatarStyleFor(person: JournalPerson): AvatarStyle {
     val palettes = personColors()
     val shapes = personShapes()
-    // What was picked for them, or else what follows from who they are, as it always has.
-    val hash = person.iconSeed.hashCode().absoluteValue
-    val (bg, fg) = palettes[(person.color ?: hash).mod(palettes.size)]
-    val shape = shapes[(person.shape ?: (hash / palettes.size)).mod(shapes.size)].toShape()
+    // One rule for everyone, everywhere: PersonIcon. What was picked, or else what follows from who they are.
+    val (bg, fg) = palettes[PersonIcon.colorOf(person).mod(palettes.size)]
+    val shape = shapes[PersonIcon.shapeOf(person).mod(shapes.size)].toShape()
     return AvatarStyle(bg, fg, shape)
 }
 
@@ -168,13 +180,16 @@ fun PersonAvatar(
             .background(style.container),
         contentAlignment = Alignment.Center
     ) {
-        Text(
-            text = person.initials,
-            color = style.content,
-            fontWeight = FontWeight.SemiBold,
-            fontSize = (size.value * 0.36f).sp,
-            maxLines = 1
-        )
+        // too small to read: the shape and colour say who it is
+        if (size >= 18.dp) {
+            Text(
+                text = person.initials,
+                color = style.content,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = (size.value * 0.36f).sp,
+                maxLines = 1
+            )
+        }
     }
 }
 
@@ -529,7 +544,7 @@ fun PeoplePickerSheet(
         val sameName = everyone.filter { it.hasName(picked.name) }
         val person = everyone.firstOrNull { it.contactLookupKey != null && it.contactLookupKey == picked.lookupKey }
             ?: sameName.singleOrNull()?.takeIf { it.contactLookupKey == null }?.copy(contactLookupKey = picked.lookupKey)
-            ?: JournalPerson(name = picked.name, contactLookupKey = picked.lookupKey)
+            ?: PersonIcon.distinctFrom(JournalPerson(name = picked.name, contactLookupKey = picked.lookupKey), sameName)
         haptics.performHapticFeedback(HapticFeedbackType.Confirm)
         // who they are comes from the contact, when June may read it and nothing was written yet
         val context = person.note ?: picked.lookupKey?.let { contactContext(pickerContext, it) }
@@ -550,7 +565,8 @@ fun PeoplePickerSheet(
 
     fun addNew() {
         if (trimmed.isEmpty()) return
-        val person = JournalPerson(name = trimmed)
+        // a second Bart gets an icon of their own, so the two can be told apart at a glance
+        val person = PersonIcon.distinctFrom(JournalPerson(name = trimmed), namesakes)
         haptics.performHapticFeedback(HapticFeedbackType.Confirm)
         onAdd(person)
         query = ""
@@ -910,12 +926,16 @@ fun PersonDetailSheet(
     var color by remember(person.id) { mutableStateOf(person.color) }
     var shape by remember(person.id) { mutableStateOf(person.shape) }
 
-    val draft = person.copy(
-        name = name.trim().ifEmpty { person.name },
-        note = note.trim().ifEmpty { null },
-        contactLookupKey = lookupKey,
-        color = color,
-        shape = shape
+    // A new name or contact must not change the icon people know them by.
+    val draft = PersonIcon.keepLook(
+        person,
+        person.copy(
+            name = name.trim().ifEmpty { person.name },
+            note = note.trim().ifEmpty { null },
+            contactLookupKey = lookupKey,
+            color = color,
+            shape = shape
+        )
     )
 
     val pickContact = rememberContactPicker { picked ->

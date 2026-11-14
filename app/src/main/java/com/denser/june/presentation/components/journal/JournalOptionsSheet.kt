@@ -23,6 +23,7 @@ import com.denser.june.core.R
 import com.denser.june.core.domain.model.Journal
 import com.denser.june.core.domain.model.enums.TagCategory
 import com.denser.june.presentation.screens.editor.components.people.PersonAvatar
+import com.denser.june.presentation.screens.editor.components.people.asKnown
 import com.denser.june.core.utils.toDayOfMonth
 import com.denser.june.core.utils.toFullDateTime
 import com.denser.june.core.utils.toShortMonth
@@ -447,7 +448,7 @@ fun JournalOptionsMetadataDetails(
                         border = null
                     )
                 }
-                journal.people.forEach { person ->
+                journal.people.map { it.asKnown() }.forEach { person ->
                     SuggestionChip(
                         onClick = {},
                         icon = { PersonAvatar(person, size = 20.dp) },
