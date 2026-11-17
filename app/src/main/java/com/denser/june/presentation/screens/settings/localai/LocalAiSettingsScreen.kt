@@ -67,7 +67,7 @@ import com.denser.june.core.R
 import com.denser.june.core.localai.DictationPrompt
 import com.denser.june.presentation.components.JuneBackButton
 import com.denser.june.presentation.components.JuneAppBarType
-import com.denser.june.presentation.components.JuneConfirmationDialog
+import com.denser.june.presentation.components.JuneActionSheet
 import com.denser.june.presentation.components.JuneTopAppBar
 import com.denser.june.presentation.navigation.AppNavigator
 import com.denser.june.presentation.screens.settings.components.SettingSection
@@ -200,7 +200,7 @@ fun LocalAiSettingsScreen(viewModel: LocalAiVM = koinViewModel()) {
     }
 
     if (showRestoreDialog) {
-        JuneConfirmationDialog(
+        JuneActionSheet(
             title = stringResource(R.string.local_ai_restore_confirm_title),
             description = stringResource(R.string.local_ai_restore_confirm_desc),
             confirmButtonText = stringResource(R.string.local_ai_restore_defaults),

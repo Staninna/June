@@ -4,9 +4,13 @@ import android.content.Context
 import android.net.Uri
 import androidx.core.content.FileProvider
 import java.io.File
+import java.io.FileOutputStream
+import java.io.InputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+
+data class CleanOrphanResult(val deletedFilesCount: Int, val freedBytes: Long)
 
 object MediaStorageManager {
 
@@ -47,27 +51,32 @@ object MediaStorageManager {
         }
     }
 
-    fun cleanOrphanedFiles(context: Context, activePaths: List<String>) {
+    fun cleanOrphanedFiles(context: Context, activePaths: List<String>): CleanOrphanResult {
         val activeFileNames = activePaths.map { File(it).name }.toSet()
-        val mediaDir = File(context.filesDir, "media")
-        if (mediaDir.exists()) {
-            mediaDir.listFiles()?.forEach { file ->
-                if (file.name !in activeFileNames) {
-                    file.delete()
+        var deletedCount = 0
+        var freedBytes = 0L
+
+        fun processDirectory(dir: File) {
+            if (!dir.exists()) return
+            dir.listFiles()?.forEach { file ->
+                if (file.isFile && file.name !in activeFileNames) {
+                    val size = file.length()
+                    if (file.delete()) {
+                        deletedCount++
+                        freedBytes += size
+                    }
                 }
             }
         }
+
+        processDirectory(File(context.filesDir, "media"))
         val legacyDir = File(context.filesDir, "journal_media")
-        if (legacyDir.exists()) {
-            legacyDir.listFiles()?.forEach { file ->
-                if (file.name !in activeFileNames) {
-                    file.delete()
-                }
-            }
-            if (legacyDir.listFiles()?.isEmpty() == true) {
-                legacyDir.delete()
-            }
+        processDirectory(legacyDir)
+        if (legacyDir.exists() && legacyDir.listFiles()?.isEmpty() == true) {
+            legacyDir.delete()
         }
+
+        return CleanOrphanResult(deletedFilesCount = deletedCount, freedBytes = freedBytes)
     }
 
     fun migrateLegacyMediaStorage(context: Context) {
@@ -151,5 +160,55 @@ object MediaStorageManager {
         if (legacyMedia.exists() && legacyMedia.length() > 0L) return legacyMedia
 
         return direct
+    }
+
+    fun getMediaDir(context: Context): File {
+        return File(context.filesDir, "media").apply {
+            if (!exists()) mkdirs()
+        }
+    }
+
+    fun saveImportedStream(
+        context: Context,
+        inputStream: InputStream,
+        source: String,
+        originalFileName: String
+    ): String {
+        val mediaDir = getMediaDir(context)
+        val ext = originalFileName.substringAfterLast('.', "jpg")
+        val safeBase = originalFileName.substringBeforeLast('.')
+            .replace(Regex("[^a-zA-Z0-9_-]"), "_")
+            .take(40)
+        val safeSource = source.replace(Regex("[^a-zA-Z0-9_-]"), "_")
+        val fileName = "import_${safeSource}_${safeBase}.$ext"
+        val targetFile = File(mediaDir, fileName)
+        if (targetFile.exists() && targetFile.length() > 0) {
+            val buf = ByteArray(8192)
+            while (inputStream.read(buf) > 0) {}
+            return targetFile.absolutePath
+        }
+        FileOutputStream(targetFile).use { fos ->
+            inputStream.copyTo(fos)
+        }
+        return targetFile.absolutePath
+    }
+
+    fun saveImportedBytes(
+        context: Context,
+        bytes: ByteArray,
+        source: String,
+        identifier: String,
+        extension: String = "jpg"
+    ): String {
+        val mediaDir = getMediaDir(context)
+        val safeId = identifier.replace(Regex("[^a-zA-Z0-9_-]"), "_").take(40)
+        val safeSource = source.replace(Regex("[^a-zA-Z0-9_-]"), "_")
+        val fileName = "import_${safeSource}_${safeId}.$extension"
+        val targetFile = File(mediaDir, fileName)
+        if (targetFile.exists() && targetFile.length() == bytes.size.toLong()) {
+            return targetFile.absolutePath
+        }
+        FileOutputStream(targetFile).use { it.write(bytes) }
+        return targetFile.absolutePath
     }
 }

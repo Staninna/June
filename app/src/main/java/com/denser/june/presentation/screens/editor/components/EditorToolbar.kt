@@ -39,11 +39,11 @@ import com.denser.hyphen.model.MarkupStyle
 import com.denser.hyphen.model.TriggerState
 import com.denser.hyphen.state.HyphenTextState
 import com.denser.june.core.R
-import com.denser.june.presentation.utils.TagUtils
 import androidx.compose.ui.res.stringResource
 import com.denser.june.core.domain.model.JournalPerson
 import com.denser.june.core.domain.model.sharedNames
 import com.denser.june.presentation.screens.editor.components.people.PersonAvatar
+import com.denser.june.presentation.utils.TagUiUtils
 
 @Composable
 fun EditorToolbar(
@@ -198,7 +198,7 @@ private fun PersonChipsContent(
             SuggestionChip(
                 onClick = { mention(JournalPerson(name = query)) },
                 label = { Text("@$query", fontSize = 13.sp, fontWeight = FontWeight.SemiBold) },
-                colors = TagUtils.getTagSuggestionChipColors("@$query"),
+                colors = TagUiUtils.getTagSuggestionChipColors("@$query"),
                 border = null,
                 shape = RoundedCornerShape(8.dp),
             )
@@ -282,7 +282,7 @@ private fun TagChipsContent(
                         fontWeight = FontWeight.SemiBold,
                     )
                 },
-                colors = TagUtils.getTagSuggestionChipColors(fullTag),
+                colors = TagUiUtils.getTagSuggestionChipColors(fullTag),
                 border = null,
                 shape = RoundedCornerShape(8.dp),
             )

@@ -38,13 +38,14 @@ import com.denser.june.presentation.screens.editor.components.people.PersonChip
 import com.denser.june.presentation.screens.editor.components.people.PersonDetailSheet
 import com.denser.june.presentation.screens.editor.components.people.PersonSuggestionChip
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import com.denser.june.core.utils.TagUtils
 import com.denser.june.presentation.components.JuneAppBarType
-import com.denser.june.presentation.components.JuneDialog
+import com.denser.june.presentation.components.JuneActionSheet
 import com.denser.june.presentation.components.JuneFloatingAction
 import com.denser.june.presentation.components.JuneFloatingActionBar
 import com.denser.june.presentation.components.JuneFullScreenDialog
 import com.denser.june.presentation.components.JuneTopAppBar
-import com.denser.june.presentation.utils.TagUtils
+import com.denser.june.presentation.utils.TagUiUtils
 import com.denser.june.presentation.utils.UiUtils
 
 
@@ -145,24 +146,20 @@ fun JournalTagsDialog(
     }
 
     if (showExitDialog) {
-        JuneDialog(
-            onDismissRequest = { showExitDialog = false },
+        JuneActionSheet(
+            onDismiss = { showExitDialog = false },
+            onConfirm = {
+                onSave(localTags, localPeople)
+                onDismiss()
+            },
             title = stringResource(R.string.save_changes_title),
-            icon = R.drawable.file_save_24px,
-            confirmButton = {
-                Button(onClick = {
-                    showExitDialog = false
-                    onSave(localTags, localPeople)
-                    onDismiss()
-                }) { Text(stringResource(R.string.action_save)) }
-            },
-            dismissButton = {
-                OutlinedButton(onClick = {
-                    showExitDialog = false
-                    onDismiss()
-                }) { Text(stringResource(R.string.action_discard)) }
-            },
-            text = { Text(stringResource(R.string.unsaved_tags_message)) }
+            description = stringResource(R.string.unsaved_tags_message),
+            confirmButtonText = stringResource(R.string.action_save),
+            confirmIcon = R.drawable.file_save_24px,
+            dismissButtonText = stringResource(R.string.action_discard),
+            dismissIcon = R.drawable.close_24px,
+            onDismissAction = { onDismiss() },
+            icon = R.drawable.file_save_24px
         )
     }
 
@@ -266,7 +263,7 @@ fun JournalTagsDialog(
             ) {
                 Spacer(modifier = Modifier.height(8.dp))
                 TagCategory.entries.forEach { category ->
-                    val spec = TagUtils.getCategoryUiSpec(category)
+                    val spec = TagUiUtils.getCategoryUiSpec(category)
                     if (category == TagCategory.People) {
                         val recent = remember(knownPeople, localPeople) {
                             knownPeople.filter { k -> localPeople.none { it.isSamePerson(k) } }.take(8)
@@ -434,7 +431,7 @@ fun TagSectionCard(
                                 )
                             },
                             shape = RoundedCornerShape(12.dp),
-                            colors = TagUtils.getTagInputChipColors(tag),
+                            colors = TagUiUtils.getTagInputChipColors(tag),
                             border = null
                         )
                     }
@@ -591,7 +588,7 @@ fun TagInputArea(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     TagCategory.entries.filter { it.prefix != null }.forEach { category ->
-                        val spec = TagUtils.getCategoryUiSpec(category)
+                        val spec = TagUiUtils.getCategoryUiSpec(category)
                         SuggestionChip(
                             onClick = {
                                 onInsertPrefix(category.prefix!!)

@@ -45,6 +45,8 @@ import com.denser.june.core.domain.logging.AppLogger
 import com.denser.june.core.domain.sync.serialize
 import com.denser.june.core.domain.sync.deserializeJournal
 import com.google.api.client.googleapis.json.GoogleJsonResponseException
+import com.google.api.client.http.HttpBackOffUnsuccessfulResponseHandler
+import com.google.api.client.util.ExponentialBackOff
 
 class GoogleDriveProvider(
     private val context: Context,
@@ -64,6 +66,7 @@ class GoogleDriveProvider(
     private val journalFolderCache = java.util.concurrent.ConcurrentHashMap<String, String>()
     private val folderValidityCache = java.util.concurrent.ConcurrentHashMap<String, Long>()
     private val folderFilesCache = java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.ConcurrentHashMap<String, String>>()
+    private val indexedFolders = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
     private val _folderUrl = MutableStateFlow<String?>(null)
     override val folderUrl: Flow<String?> = _folderUrl.asStateFlow()
 
@@ -85,11 +88,24 @@ class GoogleDriveProvider(
         credential.selectedAccount = account.account
 
         val transport = OkHttp3Transport(okHttpClient)
+
         driveService = Drive.Builder(
             transport,
-            GsonFactory.getDefaultInstance(),
-            credential
-        )
+            GsonFactory.getDefaultInstance()
+        ) { request ->
+            credential.initialize(request)
+            val backOff = ExponentialBackOff.Builder()
+                .setInitialIntervalMillis(500)
+                .setMaxIntervalMillis(5000)
+                .setMaxElapsedTimeMillis(30000)
+                .build()
+            val backOffHandler = HttpBackOffUnsuccessfulResponseHandler(backOff)
+                .setBackOffRequired { resp ->
+                    resp.statusCode == 429 || resp.statusCode == 403 || resp.statusCode in 500..599
+                }
+            request.unsuccessfulResponseHandler = backOffHandler
+            request.numberOfRetries = 4
+        }
         .setApplicationName("June")
         .build()
 
@@ -144,6 +160,7 @@ class GoogleDriveProvider(
             journalFolderCache.clear()
             folderValidityCache.clear()
             folderFilesCache.clear()
+            indexedFolders.clear()
             _folderUrl.value = null
             _isConnected.value = false
         } catch (e: Exception) {
@@ -180,6 +197,7 @@ class GoogleDriveProvider(
             journalFolderCache.clear()
             folderValidityCache.clear()
             folderFilesCache.clear()
+            indexedFolders.clear()
             _folderUrl.value = null
             syncPrefs.setGoogleDriveSyncFolderId(null)
             syncPrefs.setGoogleDriveJournalsFolderId(null)
@@ -377,6 +395,9 @@ class GoogleDriveProvider(
         if (cachedMap != null && cachedMap.containsKey(name)) {
             return@withContext cachedMap[name]
         }
+        if (parentFolderId in indexedFolders) {
+            return@withContext null
+        }
         val service = getDriveService() ?: return@withContext null
         try {
             val result = service.files().list()
@@ -416,9 +437,9 @@ class GoogleDriveProvider(
             }
             val mediaContent = ByteArrayContent(mimeType, content)
             val executedFile = if (fileId != null) {
-                service.files().update(fileId, metadata, mediaContent).execute()
+                service.files().update(fileId, metadata, mediaContent).setFields("id").execute()
             } else {
-                service.files().create(metadata, mediaContent).execute()
+                service.files().create(metadata, mediaContent).setFields("id").execute()
             }
             executedFile.id?.let { id ->
                 folderFilesCache.getOrPut(parentFolderId) { java.util.concurrent.ConcurrentHashMap() }[name] = id
@@ -441,9 +462,9 @@ class GoogleDriveProvider(
             }
             val mediaContent = com.google.api.client.http.FileContent(mimeType, file)
             val executedFile = if (fileId != null) {
-                service.files().update(fileId, metadata, mediaContent).execute()
+                service.files().update(fileId, metadata, mediaContent).setFields("id").execute()
             } else {
-                service.files().create(metadata, mediaContent).execute()
+                service.files().create(metadata, mediaContent).setFields("id").execute()
             }
             executedFile.id?.let { id ->
                 folderFilesCache.getOrPut(parentFolderId) { java.util.concurrent.ConcurrentHashMap() }[name] = id
@@ -600,6 +621,7 @@ class GoogleDriveProvider(
                 }
                 pageToken = result.nextPageToken
             } while (pageToken != null)
+            indexedFolders.add(folderId)
             Result.success(list)
         } catch (e: Exception) {
             Result.failure(e)
@@ -628,6 +650,7 @@ class GoogleDriveProvider(
                 }
                 pageToken = result.nextPageToken
             } while (pageToken != null)
+            indexedFolders.add(mediaRootId)
             Result.success(list)
         } catch (e: Exception) {
             Result.failure(e)
@@ -694,6 +717,7 @@ class GoogleDriveProvider(
                 }
                 pageToken = result.nextPageToken
             } while (pageToken != null)
+            indexedFolders.add(folderId)
             Result.success(list)
         } catch (e: Exception) {
             Result.failure(e)
@@ -747,6 +771,7 @@ class GoogleDriveProvider(
                 }
                 pageToken = result.nextPageToken
             } while (pageToken != null)
+            indexedFolders.add(folderId)
             Result.success(list)
         } catch (e: Exception) {
             Result.failure(e)

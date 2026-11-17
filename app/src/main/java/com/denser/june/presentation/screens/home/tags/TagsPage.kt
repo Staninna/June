@@ -35,20 +35,21 @@ import com.denser.june.presentation.screens.editor.components.people.openContact
 import com.denser.june.presentation.components.JuneDropdownMenu
 import com.denser.june.presentation.components.JuneDropdownMenuItem
 import com.denser.june.core.domain.model.enums.TimeFormat
+import com.denser.june.core.utils.TagUtils
 import com.denser.june.core.utils.toLocalDate
 import com.denser.june.presentation.components.journal.DayJournalGroupData
 import com.denser.june.presentation.components.journal.ExportJournalSheet
 import com.denser.june.presentation.components.JunePlaceholderPage
 import com.denser.june.presentation.navigation.AppNavigator
 import com.denser.june.presentation.navigation.Route
-import com.denser.june.presentation.screens.home.components.DayJournalGroup
+import com.denser.june.presentation.screens.home.components.dayJournalGroup
 import com.denser.june.presentation.components.journal.JournalCard
 import com.denser.june.presentation.components.journal.JournalOptionsSheet
-import com.denser.june.presentation.screens.home.tags.components.DeleteTagDialog
+import com.denser.june.presentation.components.JuneActionSheet
 import com.denser.june.presentation.screens.home.tags.components.FilterBottomSheet
 import com.denser.june.presentation.screens.home.tags.components.FilterFab
-import com.denser.june.presentation.screens.home.tags.components.RenameTagDialog
-import com.denser.june.presentation.utils.TagUtils
+import com.denser.june.presentation.screens.home.tags.components.RenameTagSheet
+import com.denser.june.presentation.utils.TagUiUtils
 import com.denser.june.presentation.utils.UiUtils
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
@@ -105,7 +106,7 @@ fun TagsPage() {
 
     val hasAvailableFilters = availableFilters.isNotEmpty() || selectedFilters.isNotEmpty()
     val activeFilterCount = selectedFilters.size
-    val currentCategorySpec = TagUtils.getCategoryUiSpec(selectedCategory)
+    val currentCategorySpec = TagUiUtils.getCategoryUiSpec(selectedCategory)
 
     Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -115,7 +116,7 @@ fun TagsPage() {
                 divider = {}
             ) {
                 TagCategory.entries.forEach { category ->
-                    val spec = TagUtils.getCategoryUiSpec(category)
+                    val spec = TagUiUtils.getCategoryUiSpec(category)
                     val isSelected = selectedCategory == category
 
                     Tab(
@@ -278,7 +279,7 @@ fun TagsPage() {
                         .fillMaxSize()
                         .weight(1f),
                     contentPadding = PaddingValues(top = 8.dp, bottom = 100.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
                     selectedPerson?.let { person ->
                         item(key = "person_header") {
@@ -315,40 +316,17 @@ fun TagsPage() {
                         }
                     } else {
                         dayGroups?.forEach { dayGroup ->
-                            if (dayGroup.journals.size > 1) {
-                                item(key = "day_group_${dayGroup.date}") {
-                                    DayJournalGroup(
-                                        date = dayGroup.date,
-                                        journals = dayGroup.journals,
-                                        is24Hour = is24Hour,
-                                        onToggleBookmark = { id -> viewModel.toggleBookmark(id) },
-                                        onJournalClick = { journal ->
-                                            navigator.navigateTo(Route.Editor(journal.id), isSingleTop = true)
-                                        },
-                                        onLongClick = { journal -> selectedJournalForOptions = journal },
-                                        modifier = Modifier
-                                            .padding(horizontal = 16.dp)
-                                            .animateItem()
-                                    )
-                                }
-                            } else {
-                                val singleJournal = dayGroup.journals.first()
-                                item(key = "single_journal_${singleJournal.id}") {
-                                    JournalCard(
-                                        journal = singleJournal,
-                                        is24Hour = is24Hour,
-                                        showDate = true,
-                                        onToggleBookmark = { viewModel.toggleBookmark(singleJournal.id) },
-                                        onJournalClick = {
-                                            navigator.navigateTo(Route.Editor(singleJournal.id), isSingleTop = true)
-                                        },
-                                        onLongClick = { selectedJournalForOptions = singleJournal },
-                                        modifier = Modifier
-                                            .padding(horizontal = 16.dp)
-                                            .animateItem()
-                                    )
-                                }
-                            }
+                            dayJournalGroup(
+                                date = dayGroup.date,
+                                journals = dayGroup.journals,
+                                is24Hour = is24Hour,
+                                onToggleBookmark = { id -> viewModel.toggleBookmark(id) },
+                                onJournalClick = { journal ->
+                                    navigator.navigateTo(Route.Editor(journal.id), isSingleTop = true)
+                                },
+                                onLongClick = { journal -> selectedJournalForOptions = journal },
+                                modifier = Modifier.padding(horizontal = 16.dp)
+                            )
                         }
                     }
                 }
@@ -443,7 +421,7 @@ fun TagsPage() {
 
         if (selectedPrimaryTag != null && allTags != null) {
             if (showRenameDialog) {
-                RenameTagDialog(
+                RenameTagSheet(
                     currentTagName = selectedPrimaryTag!!,
                     category = selectedCategory,
                     existingTags = allTags!!,
@@ -456,14 +434,20 @@ fun TagsPage() {
             }
 
             if (showDeleteDialog) {
-                DeleteTagDialog(
-                    tagName = selectedPerson?.displayName ?: selectedPrimaryTag!!,
-                    isPerson = selectedPerson != null,
+                val isPerson = selectedPerson != null
+                val tagName = selectedPerson?.displayName ?: selectedPrimaryTag!!
+                val warning = stringResource(if (isPerson) R.string.people_delete_warning else R.string.delete_tag_warning)
+                JuneActionSheet(
                     onDismiss = { showDeleteDialog = false },
                     onConfirm = {
                         viewModel.deleteCurrentTag()
                         showDeleteDialog = false
-                    }
+                    },
+                    title = stringResource(if (isPerson) R.string.people_delete_title else R.string.delete_tag_title),
+                    description = "${stringResource(R.string.about_to_delete)} \"$tagName\".\n\n$warning",
+                    confirmButtonText = stringResource(R.string.action_delete),
+                    icon = R.drawable.delete_24px,
+                    isDestructive = true
                 )
             }
         }

@@ -1,9 +1,19 @@
 package com.denser.june.core.di
 
+import com.denser.june.core.data.backup.AutoBackupNotificationHelper
 import com.denser.june.core.data.backup.ExportImpl
 import com.denser.june.core.data.backup.MarkdownImportImpl
 import com.denser.june.core.data.backup.RestoreImpl
+import com.denser.june.core.data.backup.SettingsBackupRepoImpl
+import com.denser.june.core.data.backup.WorkManagerAutoBackupScheduler
+import com.denser.june.core.data.importers.AppImportImpl
+import com.denser.june.core.data.preferences.AutoBackupPreferencesImpl
+import com.denser.june.core.domain.backup.AutoBackupManager
+import com.denser.june.core.domain.backup.AutoBackupScheduler
+import com.denser.june.core.domain.backup.BackupCoordinator
 import com.denser.june.core.domain.backup.MarkdownImportRepo
+import com.denser.june.core.domain.backup.SettingsBackupRepo
+import com.denser.june.core.domain.importers.AppImportRepo
 import com.denser.june.core.data.database.DatabaseFactory
 import com.denser.june.core.data.database.journal.JournalDatabase
 import com.denser.june.core.data.datastore.DatastoreFactory
@@ -22,6 +32,8 @@ import com.denser.june.core.domain.reminder.ReminderScheduler
 import com.denser.june.core.data.reminder.ReminderSchedulerImpl
 import com.denser.june.core.domain.backup.ExportRepo
 import com.denser.june.core.domain.backup.RestoreRepo
+import com.denser.june.core.domain.sync.SyncGate
+import com.denser.june.core.domain.preferences.AutoBackupPreferences
 import com.denser.june.core.domain.preferences.EmojiPreferences
 import com.denser.june.core.domain.preferences.FontPreferences
 import com.denser.june.core.domain.preferences.JournalPreferences
@@ -47,6 +59,7 @@ import com.denser.june.core.localai.LocalAiPreferences
 import org.koin.core.qualifier.named
 import android.content.Context
 import com.denser.june.core.data.remote.InternetInterceptor
+import com.denser.june.core.data.remote.RateLimitRetryInterceptor
 import org.koin.dsl.bind
 import org.koin.dsl.module
 
@@ -57,9 +70,13 @@ val coreModule = module {
     single { get<JournalDatabase>().journalDao() }
     single { get<JournalDatabase>().songLibraryDao() }
 
+    singleOf(::SyncGate)
     singleOf(::ExportImpl).bind<ExportRepo>()
     singleOf(::RestoreImpl).bind<RestoreRepo>()
+    singleOf(::SettingsBackupRepoImpl).bind<SettingsBackupRepo>()
+    single { BackupCoordinator(get(), get(), get(named("ApplicationScope"))) }
     singleOf(::MarkdownImportImpl).bind<MarkdownImportRepo>()
+    singleOf(::AppImportImpl).bind<AppImportRepo>()
 
     singleOf(::JournalRepositoryImpl).bind<JournalRepository>()
     singleOf(::ReminderSchedulerImpl).bind<ReminderScheduler>()
@@ -70,6 +87,10 @@ val coreModule = module {
     single { FontPreferencesImpl(get(named("PreferencesDataStore"))) }.bind<FontPreferences>()
     single { JournalPreferencesImpl(get(named("PreferencesDataStore"))) }.bind<JournalPreferences>()
     single { EmojiPreferencesImpl(get()) }.bind<EmojiPreferences>()
+    single { AutoBackupPreferencesImpl(get(named("PreferencesDataStore"))) }.bind<AutoBackupPreferences>()
+    singleOf(::AutoBackupNotificationHelper)
+    singleOf(::WorkManagerAutoBackupScheduler).bind<AutoBackupScheduler>()
+    singleOf(::AutoBackupManager)
 
     // Local AI (docs/LOCAL_LLM_API.md): talks to 127.0.0.1 only, with its own OkHttp client so the
     // "Internet access" switch (which blocks real network traffic) does not apply to on-device calls.
@@ -78,8 +99,20 @@ val coreModule = module {
     single { DictationCleanup(get(), get<LocalAiPreferences>()) }
 
     single {
+        val dispatcher = okhttp3.Dispatcher().apply {
+            maxRequestsPerHost = 40
+            maxRequests = 64
+        }
+        val connectionPool = okhttp3.ConnectionPool(
+            maxIdleConnections = 32,
+            keepAliveDuration = 5,
+            java.util.concurrent.TimeUnit.MINUTES
+        )
         OkHttpClient.Builder()
+            .dispatcher(dispatcher)
+            .connectionPool(connectionPool)
             .addInterceptor(InternetInterceptor(get()))
+            .addInterceptor(RateLimitRetryInterceptor())
             .build()
     }
     singleOf(::SongLinkScraper)
@@ -118,7 +151,8 @@ val coreModule = module {
             songLibraryDao = get(),
             songMediaDir = File(context.filesDir, "songs"),
             audioDir = File(context.filesDir, "audios"),
-            syncHashCache = get()
+            syncHashCache = get(),
+            syncGate = get()
         )
     }
 }

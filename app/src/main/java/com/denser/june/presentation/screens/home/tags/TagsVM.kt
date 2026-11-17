@@ -9,7 +9,7 @@ import com.denser.june.core.domain.model.labelKeys
 import com.denser.june.core.domain.model.enums.TagCategory
 import com.denser.june.core.domain.model.enums.TimeFormat
 import com.denser.june.core.domain.preferences.JournalPreferences
-import com.denser.june.presentation.utils.TagUtils
+import com.denser.june.core.utils.TagUtils
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
