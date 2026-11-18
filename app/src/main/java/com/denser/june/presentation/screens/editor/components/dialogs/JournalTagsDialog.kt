@@ -27,6 +27,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import com.denser.june.core.R
 import com.denser.june.core.domain.model.JournalPerson
+import com.denser.june.core.domain.model.sharesName
 import com.denser.june.core.domain.model.enums.TagCategory
 import com.denser.june.presentation.screens.editor.components.people.PersonSuggestionChip
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -405,7 +406,7 @@ fun TagInputArea(
                     items(people, key = { it.id }) { person ->
                         PersonSuggestionChip(
                             person = person,
-                            showContext = person.name.trim().lowercase() in sharedNames,
+                            showContext = person.sharesName(sharedNames),
                             onClick = { onAddPerson(person) }
                         )
                     }

@@ -107,6 +107,12 @@ fun List<JournalPerson>.distinctPeople(): List<JournalPerson> = distinctBy { it.
 fun List<JournalPerson>.sharedNames(): Set<String> =
     groupingBy { it.name.trim().lowercase() }.eachCount().filterValues { it > 1 }.keys
 
+/** Whether this person has one of [sharedNames] (from [sharedNames]): their main label then tells them apart. */
+fun JournalPerson.sharesName(sharedNames: Set<String>): Boolean = name.trim().lowercase() in sharedNames
+
+/** The name to show among people who may share it: "Bart · Work" when the name is shared, else "Bart". */
+fun JournalPerson.nameAmong(sharedNames: Set<String>): String = if (sharesName(sharedNames)) displayName else name.trim()
+
 /**
  * Adds [person] to the people on an entry. Someone who is already there is not added twice, but
  * a contact link that comes with [person] (they were just picked from the address book) is kept.

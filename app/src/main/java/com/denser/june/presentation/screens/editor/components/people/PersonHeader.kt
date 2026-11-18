@@ -25,6 +25,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.denser.june.core.R
 import com.denser.june.core.domain.model.JournalPerson
+import com.denser.june.core.domain.model.nameAmong
 import com.denser.june.core.domain.model.sharedNames
 import com.denser.june.core.utils.TagUtils
 
@@ -41,7 +42,7 @@ class PeopleIndex(known: List<JournalPerson>) {
     /** A person by name, with their main label when the name is shared; any other label as it is written. */
     fun text(label: String): String {
         val person = byKey[label] ?: return TagUtils.getCleanTagName(label)
-        return if (person.name.trim().lowercase() in sharedNames) person.displayName else person.name.trim()
+        return person.nameAmong(sharedNames)
     }
 }
 

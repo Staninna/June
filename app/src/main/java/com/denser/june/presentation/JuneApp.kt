@@ -32,9 +32,8 @@ import com.denser.june.presentation.utils.StartupManager
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import org.koin.compose.koinInject
-import com.denser.june.core.domain.repository.JournalRepository
-import com.denser.june.presentation.screens.editor.components.people.LocalPeople
-import com.denser.june.presentation.screens.editor.components.people.ProvidePersonColors
+import com.denser.june.presentation.components.CleanupPillHost
+import com.denser.june.presentation.screens.editor.components.people.ProvideJournalPeople
 import com.denser.june.core.domain.billing.BillingHandler
 import com.denser.june.presentation.plus.JunePlusPaywallScreen
 import com.denser.june.presentation.plus.LocalIsPlus
@@ -137,24 +136,17 @@ fun JuneApp(
 
     val uiDirection = if (appState.isForceLtrUi) LayoutDirection.Ltr else LocalLayoutDirection.current
 
-    // Everyone in the journal, so a person looks the same wherever they are shown.
-    val journalRepository = koinInject<JournalRepository>()
-    val knownPeople by remember(journalRepository) { journalRepository.getKnownPeople() }
-        .collectAsStateWithLifecycle(initialValue = emptyList())
-    val people = remember(knownPeople) { knownPeople.associateBy { it.id } }
-
     CompositionLocalProvider(
         LocalAppTheme provides appState.appTheme,
         LocalInternetAllowed provides appState.isInternetAllowed,
         LocalSyncEnabled provides appState.isSyncEnabled,
-        LocalPeople provides people,
         LocalLayoutDirection provides uiDirection,
         LocalIsPlus provides isPlus,
         LocalPlusSheetController provides plusSheetController
     ) {
         JuneTheme(appTheme = appState.appTheme) {
             // people keep the app's colours, also inside an entry that has a theme of its own
-            ProvidePersonColors {
+            ProvideJournalPeople {
             Box(modifier = Modifier.fillMaxSize()) {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     JuneNavHost(
@@ -173,17 +165,8 @@ fun JuneApp(
                 JunePlusPaywallScreen(controller = plusSheetController)
 
                 // a cleanup that runs (or waits for review) while the user is elsewhere in June
-                val cleanupSession = koinInject<com.denser.june.presentation.screens.editor.CleanupSession>()
-                val cleanupSnapshot by cleanupSession.snapshot.collectAsStateWithLifecycle()
-                com.denser.june.presentation.components.CleanupPill(
-                    snapshot = cleanupSnapshot,
-                    onClick = {
-                        val id = cleanupSnapshot.entryKey
-                        if (id != null && cleanupSnapshot.canOpenEntry) {
-                            cleanupSession.expand()
-                            navigator.navigateTo(Route.Editor(journalId = id))
-                        }
-                    },
+                CleanupPillHost(
+                    onOpenEntry = { navigator.navigateTo(Route.Editor(journalId = it)) },
                     modifier = Modifier.align(Alignment.BottomCenter),
                 )
             }

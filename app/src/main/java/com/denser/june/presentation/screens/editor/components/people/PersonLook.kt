@@ -29,8 +29,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.denser.june.core.domain.model.JournalPerson
 import com.denser.june.core.domain.model.PersonIcon
+import com.denser.june.core.domain.repository.JournalRepository
+import org.koin.compose.koinInject
 
 // -------------------------------------------------------------------------------------------------
 // Avatar
@@ -72,6 +75,19 @@ private fun personColorsOf(c: ColorScheme): List<Pair<Color, Color>> =
 fun ProvidePersonColors(content: @Composable () -> Unit) {
     val colors = personColorsOf(MaterialTheme.colorScheme)
     CompositionLocalProvider(LocalPersonColors provides colors, content = content)
+}
+
+/**
+ * Everyone in the journal for [LocalPeople], and the person colours of the theme in force here,
+ * for everything inside: a person looks the same wherever they are shown.
+ */
+@Composable
+fun ProvideJournalPeople(content: @Composable () -> Unit) {
+    val journalRepository = koinInject<JournalRepository>()
+    val knownPeople by remember(journalRepository) { journalRepository.getKnownPeople() }
+        .collectAsStateWithLifecycle(initialValue = emptyList())
+    val people = remember(knownPeople) { knownPeople.associateBy { it.id } }
+    CompositionLocalProvider(LocalPeople provides people) { ProvidePersonColors(content) }
 }
 
 /** The shapes a person's icon can have. */
