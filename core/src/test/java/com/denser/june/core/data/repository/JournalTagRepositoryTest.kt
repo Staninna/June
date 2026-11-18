@@ -203,6 +203,46 @@ class JournalTagRepositoryTest {
     }
 
     @Test
+    fun insertJournalsBatch_makesOneNewPersonOfANameAcrossTheBatchAndReadsPeopleOnce() = runTest {
+        repository.insertJournalsBatch(
+            listOf(
+                journal("j1", people = listOf(JournalPerson.named("Ada"))),
+                journal("j2", tags = listOf("@Ada")),
+                journal("j3", people = listOf(JournalPerson.named("Bo"))),
+            )
+        )
+
+        val ada = fakeDao.journals["j1"]!!.people.single()
+        assertFalse(ada.isUnresolved)
+        assertEquals(listOf(ada), fakeDao.journals["j2"]!!.people)
+        assertEquals(setOf("j1", "j2"), fakeDao.crossRefs.filter { it.tagName == ada.key }.map { it.id }.toSet())
+        assertEquals(1, fakeDao.peopleReads)
+    }
+
+    @Test
+    fun insertJournal_matchesANameToTheKnownPerson() = runTest {
+        val ada = JournalPerson(id = "a1", name = "Ada")
+        repository.insertJournal(journal("j1", people = listOf(ada)))
+
+        repository.insertJournal(journal("j2", people = listOf(JournalPerson.named("ada"))))
+
+        assertEquals(listOf(ada), fakeDao.journals["j2"]!!.people)
+    }
+
+    @Test
+    fun insertJournal_aNameOfSomeoneRemovedBecomesANewPerson() = runTest {
+        repository.insertJournalsBatch(listOf(journal("j1", people = listOf(JournalPerson.named("Ada")))))
+        val removed = fakeDao.journals["j1"]!!.people.single()
+        repository.removePerson(removed.id)
+
+        repository.insertJournal(journal("j2", people = listOf(JournalPerson.named("Ada"))))
+
+        val ada = fakeDao.journals["j2"]!!.people.single()
+        assertFalse(ada.isUnresolved)
+        assertTrue(ada.id != removed.id)
+    }
+
+    @Test
     fun renameTag_toAPersonLabelMakesOnePersonOfIt() = runTest {
         repository.insertJournal(journal("j1", tags = listOf("Anna", "work")))
         repository.insertJournal(journal("j2", tags = listOf("Anna")))

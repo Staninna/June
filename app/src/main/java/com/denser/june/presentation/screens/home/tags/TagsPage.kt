@@ -23,19 +23,16 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.denser.june.core.R
 import com.denser.june.core.domain.model.enums.TagCategory
 import com.denser.june.core.domain.model.Journal
-import com.denser.june.core.domain.model.JournalPerson
-import com.denser.june.core.domain.model.sharedNames
 import android.widget.Toast
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.pluralStringResource
-import androidx.compose.ui.text.style.TextOverflow
+import com.denser.june.presentation.screens.editor.components.people.PeopleIndex
 import com.denser.june.presentation.screens.editor.components.people.PersonAvatar
 import com.denser.june.presentation.screens.editor.components.people.PersonDetailSheet
+import com.denser.june.presentation.screens.editor.components.people.PersonHeader
 import com.denser.june.presentation.screens.editor.components.people.openContact
 import com.denser.june.presentation.components.JuneDropdownMenu
 import com.denser.june.presentation.components.JuneDropdownMenuItem
 import com.denser.june.core.domain.model.enums.TimeFormat
-import com.denser.june.core.utils.TagUtils
 import com.denser.june.core.utils.toLocalDate
 import com.denser.june.presentation.components.journal.DayJournalGroupData
 import com.denser.june.presentation.components.journal.ExportJournalSheet
@@ -75,16 +72,9 @@ fun TagsPage() {
     val knownPeople by viewModel.knownPeople.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
-    // A person label (`@<id>`) stands for a person: look up who.
-    val peopleByKey = remember(knownPeople) { knownPeople.associateBy { it.key } }
-    val sharedNames = remember(knownPeople) { knownPeople.sharedNames() }
-    /** What a label is called on screen: a person by name, with context when the name is shared. */
-    fun labelText(label: String): String {
-        val person = peopleByKey[label] ?: return TagUtils.getCleanTagName(label)
-        return if (person.name.trim().lowercase() in sharedNames) person.displayName else person.name.trim()
-    }
+    val people = remember(knownPeople) { PeopleIndex(knownPeople) }
     val isPeopleTab = selectedCategory == TagCategory.People
-    val selectedPerson = selectedPrimaryTag?.takeIf { isPeopleTab }?.let { peopleByKey[it] }
+    val selectedPerson = selectedPrimaryTag?.takeIf { isPeopleTab }?.let(people::personOf)
     var showPersonSheet by remember { mutableStateOf(false) }
 
     val navigator = koinInject<AppNavigator>()
@@ -163,12 +153,12 @@ fun TagsPage() {
                             onClick = { viewModel.selectPrimaryTag(fullTag) },
                             modifier = Modifier.height(40.dp),
                             shape = RoundedCornerShape(16.dp),
-                            leadingIcon = peopleByKey[fullTag]?.let { person ->
+                            leadingIcon = people.personOf(fullTag)?.let { person ->
                                 { PersonAvatar(person, size = 26.dp) }
                             },
                             label = {
                                 Text(
-                                    text = if (isPeopleTab) labelText(fullTag) else fullTag,
+                                    text = if (isPeopleTab) people.text(fullTag) else fullTag,
                                     style = MaterialTheme.typography.bodyLarge,
                                     fontWeight = if (isSelected) FontWeight.Medium else FontWeight.Normal
                                 )
@@ -358,7 +348,7 @@ fun TagsPage() {
             FilterBottomSheet(
                 sheetState = filterSheetState,
                 availableFilters = availableFilters,
-                labelText = ::labelText,
+                labelText = people::text,
                 selectedFilters = selectedFilters,
                 onToggle = { viewModel.toggleFilter(it) },
                 onClearAll = { viewModel.clearFilters() },
@@ -448,65 +438,6 @@ fun TagsPage() {
                     confirmButtonText = stringResource(R.string.action_delete),
                     icon = R.drawable.delete_24px,
                     isDestructive = true
-                )
-            }
-        }
-    }
-}
-
-/** Who the selected person is: avatar, context, how many entries, and a way to their contact. */
-@Composable
-private fun PersonHeader(
-    person: JournalPerson,
-    entryCount: Int,
-    onEdit: () -> Unit,
-    onOpenContact: (String) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Surface(
-        onClick = onEdit,
-        shape = RoundedCornerShape(24.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-        modifier = modifier.fillMaxWidth()
-    ) {
-        Row(
-            modifier = Modifier.padding(start = 16.dp, end = 8.dp, top = 14.dp, bottom = 14.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            PersonAvatar(person, size = 52.dp)
-            Spacer(Modifier.width(14.dp))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    text = person.name,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                val entries = pluralStringResource(R.plurals.people_entry_count, entryCount, entryCount)
-                Text(
-                    text = person.note?.takeIf { it.isNotBlank() }?.let { "$it • $entries" } ?: entries,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-            person.contactLookupKey?.let { lookupKey ->
-                FilledTonalIconButton(onClick = { onOpenContact(lookupKey) }) {
-                    Icon(
-                        painter = painterResource(R.drawable.person_24px_fill),
-                        contentDescription = stringResource(R.string.people_open_contact),
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-            }
-            IconButton(onClick = onEdit) {
-                Icon(
-                    painter = painterResource(R.drawable.edit_24px),
-                    contentDescription = stringResource(R.string.people_edit),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(20.dp)
                 )
             }
         }

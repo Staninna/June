@@ -1,5 +1,7 @@
 package com.denser.june.core.localai
 
+import com.denser.june.core.domain.model.mentionCode
+
 /**
  * The "Clean up dictation" prompt, and how an entry is prepared for the model.
  *
@@ -284,7 +286,7 @@ data class NameChoice(val name: String, val candidates: List<CleanupPerson>, val
             OPEN_MENTION.replace(text) { m ->
                 val key = m.groupValues[2]
                 val person = choices.firstOrNull { it.key == key }?.candidates?.firstOrNull { it.id == picks[key] }
-                if (person != null) "[@${person.name.trim()}](person:${person.id})" else m.groupValues[1].removePrefix("@").trim()
+                if (person != null) mentionCode(person.name, person.id) else m.groupValues[1].removePrefix("@").trim()
             }
     }
 }

@@ -4,7 +4,7 @@ import com.denser.june.core.localai.DictationCleanup
 import com.denser.june.core.localai.NameChoice
 import com.denser.june.core.localai.TextDiff
 
-/** State of the "Clean up dictation" flow. The entry is only changed by [EditorVM.acceptCleanup]. */
+/** State of the "Clean up dictation" flow. The entry is only changed by [EditorCleanup.accept]. */
 sealed interface CleanupUiState {
     data object Hidden : CleanupUiState
 

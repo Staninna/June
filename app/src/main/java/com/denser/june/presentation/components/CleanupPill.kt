@@ -36,6 +36,8 @@ import com.denser.june.core.R
 import com.denser.june.core.localai.DictationCleanup
 import com.denser.june.presentation.screens.editor.CleanupSession
 import com.denser.june.presentation.screens.editor.CleanupUiState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import org.koin.compose.koinInject
 
 /**
  * A cleanup that is still running, or a rewrite that waits for review, while the user is somewhere
@@ -113,3 +115,21 @@ private fun pillTitle(state: CleanupUiState): String =
         }
         else -> ""
     }
+
+/** The pill over the whole app while a cleanup runs elsewhere; tapping it opens its entry. */
+@Composable
+fun CleanupPillHost(onOpenEntry: (journalId: String) -> Unit, modifier: Modifier = Modifier) {
+    val session = koinInject<CleanupSession>()
+    val snapshot by session.snapshot.collectAsStateWithLifecycle()
+    CleanupPill(
+        snapshot = snapshot,
+        onClick = {
+            val id = snapshot.entryKey
+            if (id != null && snapshot.canOpenEntry) {
+                session.expand()
+                onOpenEntry(id)
+            }
+        },
+        modifier = modifier,
+    )
+}

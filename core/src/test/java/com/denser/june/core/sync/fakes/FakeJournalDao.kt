@@ -129,7 +129,19 @@ class FakeJournalDao : JournalDao {
 
     override fun getAllUniqueTags(): Flow<List<String>> = flowOf(tags.toList())
 
-    override fun getAllPeopleJson(): Flow<List<String>> = flowOf(emptyList())
+    /** How often the people of the journal were read, to check that a batch reads them once. */
+    var peopleReads = 0
+
+    override fun getAllPeopleJson(): Flow<List<String>> = kotlinx.coroutines.flow.flow {
+        peopleReads++
+        val converters = com.denser.june.core.data.database.converters.JournalTypeConverters()
+        emit(
+            journals.values
+                .filter { it.deletedAt == null && !it.isLocked && it.people.isNotEmpty() }
+                .sortedByDescending { it.dateTime }
+                .map { converters.fromPeopleList(it.people) }
+        )
+    }
 
     override fun getAllTagCounts(): Flow<List<TagCount>> = flowOf(emptyList())
 

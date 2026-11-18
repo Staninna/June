@@ -57,10 +57,6 @@ data class JournalPerson(
     val iconSeed: String
         get() = contactLookupKey?.let { "contact:$it" } ?: "name:${name.trim().lowercase()}"
 
-    /** What makes this person this person: the id. Never the name. */
-    val identityKey: String
-        get() = id
-
     /** The person as a label in the index of everything entries are filed under: `@<id>`. */
     val key: String
         get() = PERSON_PREFIX + id
@@ -111,6 +107,12 @@ fun List<JournalPerson>.distinctPeople(): List<JournalPerson> = distinctBy { it.
 fun List<JournalPerson>.sharedNames(): Set<String> =
     groupingBy { it.name.trim().lowercase() }.eachCount().filterValues { it > 1 }.keys
 
+/** Whether this person has one of [sharedNames] (from [sharedNames]): their main label then tells them apart. */
+fun JournalPerson.sharesName(sharedNames: Set<String>): Boolean = name.trim().lowercase() in sharedNames
+
+/** The name to show among people who may share it: "Bart · Work" when the name is shared, else "Bart". */
+fun JournalPerson.nameAmong(sharedNames: Set<String>): String = if (sharesName(sharedNames)) displayName else name.trim()
+
 /**
  * Adds [person] to the people on an entry. Someone who is already there is not added twice, but
  * a contact link that comes with [person] (they were just picked from the address book) is kept.
@@ -138,10 +140,7 @@ fun List<JournalPerson>.resolvePeople(
     }.distinctPeople()
 
 /** An entry's spaces and topics, with its people moved out of the tags. */
-data class EntryLabels(val tags: List<String>, val people: List<JournalPerson>) {
-    /** Everything the entry is filed under in the index: tags, then each person as `@<id>`. */
-    val keys: List<String> get() = (tags + people.map { it.key }).distinct()
-}
+data class EntryLabels(val tags: List<String>, val people: List<JournalPerson>)
 
 /**
  * People used to exist twice: as `@name` tags and as the people on an entry. This makes them one.
@@ -176,14 +175,23 @@ fun Journal.withUnifiedPeople(): Journal {
     else copy(tags = unified.tags, people = unified.people)
 }
 
-/** Everything the entry is filed under in the index: its tags plus each person as `@<id>`. */
-val Journal.labelKeys: List<String>
-    get() = (tags + people.map { it.key }).distinct()
+/** Everything an entry is filed under in the index: its tags plus each person as `@<id>`. */
+fun labelKeys(tags: List<String>, people: List<JournalPerson>): List<String> = (tags + people.map { it.key }).distinct()
 
-/** `[@Bart](person:<id>)`: a mention of this person in an entry's text. */
-fun JournalPerson.mentionCode(): String = "[${label}](person:$id)"
+/** Everything the entry is filed under in the index. See [labelKeys]. */
+val Journal.labelKeys: List<String>
+    get() = labelKeys(tags, people)
+
+/** `[@Bart](person:<id>)`: how a mention of a person is written in an entry's text. */
+fun mentionCode(name: String, id: String): String = "[${JournalPerson.PERSON_PREFIX}${name.trim()}](person:$id)"
+
+/** A mention of this person in an entry's text. See [mentionCode]. */
+fun JournalPerson.mentionCode(): String = mentionCode(name, id)
 
 private val MENTION_OF = Regex("""\[@?[^\[\]]*\]\(\s*person\s*:\s*([^()\n]+?)\s*\)""")
+
+/** The ids of the people mentioned in [content], in order of appearance. */
+fun mentionedPersonIds(content: String): List<String> = MENTION_OF.findAll(content).map { it.groupValues[1] }.toList()
 
 /** Rewrites the mentions of [person] in [content] so they show the person's current name. */
 fun renameMentions(content: String, person: JournalPerson): String =

@@ -152,7 +152,7 @@ class FakeJournalRepository : JournalRepository {
             list.filter { !it.isLocked && it.deletedAt == null }
                 .sortedByDescending { it.dateTime }
                 .flatMap { it.people }
-                .distinctBy { it.identityKey }
+                .distinctBy { it.id }
         }
 
     override fun getUniqueTags(): Flow<List<String>> =
