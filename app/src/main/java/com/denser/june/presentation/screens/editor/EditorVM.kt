@@ -13,10 +13,7 @@ import com.denser.june.core.domain.repository.SongRepository
 import com.denser.june.core.domain.preferences.JournalPreferences
 import com.denser.june.core.domain.model.Journal
 import com.denser.june.core.domain.model.JournalPerson
-import com.denser.june.core.domain.model.unifyPeople
 import com.denser.june.core.domain.model.renameMentions
-import com.denser.june.core.domain.model.resolvePeople
-import com.denser.june.core.domain.model.withPerson
 import com.denser.june.core.domain.model.JournalAudio
 import com.denser.june.core.domain.model.JournalTheme
 import com.denser.june.core.domain.model.SongDetails
@@ -110,7 +107,7 @@ class EditorVM(
         override fun replaceBody(markdown: String) = this@EditorVM.replaceBody(markdown)
         override fun addPeople(people: List<JournalPerson>) {
             if (people.isEmpty()) return
-            updateState { st -> st.copy(people = people.fold(st.people) { all, person -> all.withPerson(person) }) }
+            updateState { st -> people.fold(st) { all, person -> all.withPersonAdded(person) } }
         }
         override fun say(message: Int) {
             viewModelScope.launch { _uiEvent.send(context.getString(message)) }
@@ -166,15 +163,7 @@ class EditorVM(
 
         viewModelScope.launch {
             journalRepo.getKnownPeople().collect { known ->
-                _state.update { st ->
-                    // A new entry started from a person: now that people are loaded, put them on it.
-                    val started = st.pendingPeople.mapNotNull { label ->
-                        known.firstOrNull { it.key == label }
-                            ?: JournalPerson.nameFromLabel(label).takeIf { it.isNotEmpty() }?.let(JournalPerson::named)
-                    }
-                    val people = started.fold(st.people) { all, person -> all.withPerson(person) }.resolvePeople(known)
-                    st.copy(knownPeople = known, people = people, pendingPeople = emptyList())
-                }
+                _state.update { it.withKnownPeople(known) }
             }
         }
 
@@ -285,33 +274,24 @@ class EditorVM(
             }
             is EditorAction.Refresh -> updateState { it }
 
-            is EditorAction.UpdateTags -> updateState { st ->
-                val unified = unifyPeople(action.tags, st.people, st.knownPeople)
-                st.copy(tags = unified.tags, people = unified.people.resolvePeople(st.knownPeople))
-            }
+            is EditorAction.UpdateTags -> updateState { it.withTags(action.tags) }
             is EditorAction.UpdateLabels -> {
                 val before = _state.value
-                val unified = unifyPeople(action.tags, action.people, before.knownPeople)
-                val people = unified.people.resolvePeople(before.knownPeople)
-                updateState { it.copy(tags = unified.tags, people = people) }
-                people.forEach { person -> updatePersonEverywhere(before.personWithId(person.id), person) }
+                updateState { it.withLabels(action.tags, action.people) }
+                _state.value.people.forEach { person -> updatePersonEverywhere(before.personWithId(person.id), person) }
             }
             is EditorAction.AddPerson -> {
                 val before = _state.value
-                updateState { st -> st.copy(people = st.people.withPerson(action.person)) }
+                updateState { it.withPersonAdded(action.person) }
                 // Linking a contact while adding counts for the person, not just for this entry.
                 updatePersonEverywhere(before.personWithId(action.person.id), action.person)
             }
             is EditorAction.UpdatePerson -> {
                 val before = _state.value
-                updateState { st ->
-                    st.copy(people = st.people.map { if (it.id == action.person.id) action.person else it })
-                }
+                updateState { it.withPersonChanged(action.person) }
                 updatePersonEverywhere(before.personWithId(action.person.id), action.person)
             }
-            is EditorAction.RemovePerson -> updateState { st ->
-                st.copy(people = st.people.filterNot { it.id == action.id })
-            }
+            is EditorAction.RemovePerson -> updateState { it.withoutPerson(action.id) }
             is EditorAction.SetJournalFont -> {
                 updateState { it.copy(font = action.fontName, fontVariation = action.variation) }
             }
@@ -542,10 +522,6 @@ class EditorVM(
         }
         viewModelScope.launch { journalRepo.updatePerson(updated) }
     }
-
-    /** The person as the journal knew them before an edit: on this entry, or on any other. */
-    private fun EditorState.personWithId(id: String): JournalPerson? =
-        people.firstOrNull { it.id == id } ?: knownPeople.firstOrNull { it.id == id }
 
     private fun updateState(update: (EditorState) -> EditorState) {
         _state.update { currentState ->
