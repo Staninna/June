@@ -12,20 +12,17 @@ import com.denser.june.core.data.mappers.asEntity
 import com.denser.june.core.domain.repository.JournalRepository
 import com.denser.june.core.domain.model.Journal
 import com.denser.june.core.domain.model.JournalPerson
-import com.denser.june.core.domain.model.distinctPeople
 import com.denser.june.core.domain.model.labelKeys
-import com.denser.june.core.domain.model.renameMentions
-import com.denser.june.core.domain.model.resolvePeople
-import com.denser.june.core.domain.model.unifyPeople
 import com.denser.june.core.domain.model.SyncStatusUpdate
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
 class JournalRepositoryImpl(
     private val journalDao: JournalDao,
     private val journalDatabase: JournalDatabase? = null
 ) : JournalRepository {
+
+    private val people = JournalPeopleStore(journalDao)
 
     internal var transactionRunner: suspend (suspend () -> Unit) -> Unit = { block ->
         val db = journalDatabase
@@ -88,9 +85,9 @@ class JournalRepositoryImpl(
     }
 
     override suspend fun insertJournal(journal: Journal): String {
-        val journalToInsert = (if (journal.id.isBlank()) {
+        val journalToInsert = people.readyForStorage(if (journal.id.isBlank()) {
             journal.copy(id = java.util.UUID.randomUUID().toString())
-        } else journal).readyForStorage()
+        } else journal)
 
         transactionRunner {
             journalDao.insertJournal(journalToInsert.asEntity())
@@ -101,11 +98,9 @@ class JournalRepositoryImpl(
 
     override suspend fun insertJournalsBatch(journals: List<Journal>) {
         if (journals.isEmpty()) return
-        // Same preparation as insertJournal: ids first, then people made storable, so the
-        // label rows below hold each person as `@<id>` like everywhere else.
-        val prepared = journals.map { j ->
-            (if (j.id.isBlank()) j.copy(id = java.util.UUID.randomUUID().toString()) else j).readyForStorage()
-        }
+        val prepared = people.readyForStorage(journals.map { j ->
+            if (j.id.isBlank()) j.copy(id = java.util.UUID.randomUUID().toString()) else j
+        })
         transactionRunner {
             journalDao.insertJournals(prepared.map { it.asEntity() })
 
@@ -166,16 +161,16 @@ class JournalRepositoryImpl(
     }
 
     override suspend fun updateJournal(journal: Journal) {
-        val unified = journal.readyForStorage()
+        val prepared = people.readyForStorage(journal)
         transactionRunner {
-            journalDao.updateJournal(unified.asEntity())
-            replaceJournalTags(unified.id, unified.labelKeys)
+            journalDao.updateJournal(prepared.asEntity())
+            replaceJournalTags(prepared.id, prepared.labelKeys)
         }
     }
 
     override suspend fun updateJournalsBatch(journals: List<Journal>) {
         if (journals.isEmpty()) return
-        val prepared = journals.map { it.readyForStorage() }
+        val prepared = people.readyForStorage(journals)
         transactionRunner {
             journalDao.updateJournals(prepared.map { it.asEntity() })
             prepared.forEach { j ->
@@ -183,30 +178,6 @@ class JournalRepositoryImpl(
             }
         }
     }
-
-    /**
-     * Makes the people on an entry storable: `@name` tags become people, and anyone known by
-     * name only (from such a tag or an imported file) is matched to the person with that name or
-     * becomes a new one. An entry that still had `@name` tags (a backup, or a copy synced from an
-     * older version) is stored as edited now, so sync uploads the new form instead of putting
-     * the old one back.
-     */
-    private suspend fun Journal.readyForStorage(): Journal {
-        val unified = unifyPeople(tags, people)
-        val hadPeopleTags = unified.tags != tags
-        if (!hadPeopleTags && unified.people == people && people.none { it.isUnresolved }) return this
-        val resolved =
-            if (unified.people.any { it.isUnresolved }) unified.people.resolvePeople(getKnownPeople().first(), importedPeople)
-            else unified.people
-        return copy(
-            tags = unified.tags,
-            people = resolved,
-            updatedAt = if (hadPeopleTags) System.currentTimeMillis() else updatedAt
-        )
-    }
-
-    /** New people made from names while storing, so one import does not make the same person twice. */
-    private val importedPeople = java.util.concurrent.ConcurrentHashMap<String, JournalPerson>()
 
     /**
      * Rewrites the tag rows for a single journal. The rows hold the journal's labels: its tags and
@@ -236,16 +207,7 @@ class JournalRepositoryImpl(
         return journalDao.getAllUniqueTags()
     }
 
-    override fun getKnownPeople(): Flow<List<JournalPerson>> {
-        val converters = com.denser.june.core.data.database.converters.JournalTypeConverters()
-        return journalDao.getAllPeopleJson().map { rows ->
-            rows.asSequence()
-                .flatMap { converters.toPeopleList(it).asSequence() }
-                .filter { it.name.isNotBlank() }
-                .toList()
-                .distinctPeople()
-        }
-    }
+    override fun getKnownPeople(): Flow<List<JournalPerson>> = people.knownPeople()
 
     override fun getTagCounts(): Flow<Map<String, Int>> {
         return journalDao.getAllTagCounts().map { list ->
@@ -267,32 +229,13 @@ class JournalRepositoryImpl(
             journalDao.deleteTagCrossRefs(trimmedOld)
             journalDao.deleteTag(trimmedOld)
 
-            // Renaming a tag to `@name` turns it into a person: the one with that name, or a new one.
-            val known = if (JournalPerson.isPersonLabel(trimmedNew)) getKnownPeople().first() else emptyList()
-            val assigned = mutableMapOf<String, JournalPerson>()
-            val updatedEntities = affectedJournals.mapNotNull { entity ->
-                val renamed = entity.tags.map { if (it == trimmedOld) trimmedNew else it }.distinct()
-                val unified = unifyPeople(renamed, entity.people, known)
-                val people = unified.people.resolvePeople(known, assigned)
-                if (unified.tags != entity.tags || people != entity.people) {
-                    entity.copy(tags = unified.tags, people = people, updatedAt = timestamp)
-                } else {
-                    null
-                }
-            }
+            val updatedEntities = people.renameTag(affectedJournals, trimmedOld, trimmedNew, timestamp)
 
             if (updatedEntities.isNotEmpty()) {
                 journalDao.updateJournals(updatedEntities)
-                // a tag that became a person is filed under the person now
-                if (JournalPerson.isPersonLabel(trimmedNew)) {
-                    journalDao.deleteTagCrossRefs(trimmedNew)
-                    journalDao.deleteTag(trimmedNew)
-                    updatedEntities.forEach { entity ->
-                        val keys = entity.people.map { it.key }
-                        journalDao.insertTags(keys.map { TagEntity(name = it) })
-                        journalDao.insertJournalTagCrossRefs(keys.map { JournalTagCrossRef(id = entity.id, tagName = it) })
-                    }
-                }
+                // each entry is filed under its labels again: a tag renamed to `@name` is the person now
+                updatedEntities.forEach { replaceJournalTags(it.id, labelKeys(it.tags, it.people)) }
+                journalDao.deleteOrphanedTags()
             }
         }
     }
@@ -324,41 +267,16 @@ class JournalRepositoryImpl(
     }
 
     override suspend fun updatePerson(updated: JournalPerson) {
-        val name = updated.name.trim()
-        if (name.isEmpty()) return
-        val person = updated.copy(name = name, note = updated.note?.trim()?.takeIf { it.isNotEmpty() })
-
         transactionRunner {
-            val timestamp = System.currentTimeMillis()
-            val updatedEntities = journalDao.getAllJournalsByTagNameSync(person.key).mapNotNull { entity ->
-                val people = entity.people.map { if (it.isSamePerson(person)) person else it }
-                // mentions in the text show the name, so they follow a rename
-                val content = renameMentions(entity.content, person)
-                if (people != entity.people || content != entity.content) {
-                    entity.copy(people = people, content = content, updatedAt = timestamp)
-                } else {
-                    null
-                }
-            }
-            if (updatedEntities.isNotEmpty()) {
-                journalDao.updateJournals(updatedEntities)
-            }
+            val updatedEntities = people.updatePerson(updated, System.currentTimeMillis())
+            if (updatedEntities.isNotEmpty()) journalDao.updateJournals(updatedEntities)
         }
     }
 
     override suspend fun removePerson(personId: String) {
-        val key = JournalPerson.PERSON_PREFIX + personId
         transactionRunner {
-            val timestamp = System.currentTimeMillis()
-            val updatedEntities = journalDao.getAllJournalsByTagNameSync(key).mapNotNull { entity ->
-                val people = entity.people.filterNot { it.id == personId }
-                if (people != entity.people) entity.copy(people = people, updatedAt = timestamp) else null
-            }
-            journalDao.deleteTagCrossRefs(key)
-            journalDao.deleteTag(key)
-            if (updatedEntities.isNotEmpty()) {
-                journalDao.updateJournals(updatedEntities)
-            }
+            val updatedEntities = people.removePerson(personId, System.currentTimeMillis())
+            if (updatedEntities.isNotEmpty()) journalDao.updateJournals(updatedEntities)
         }
     }
 

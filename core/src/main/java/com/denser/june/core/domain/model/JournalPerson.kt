@@ -57,10 +57,6 @@ data class JournalPerson(
     val iconSeed: String
         get() = contactLookupKey?.let { "contact:$it" } ?: "name:${name.trim().lowercase()}"
 
-    /** What makes this person this person: the id. Never the name. */
-    val identityKey: String
-        get() = id
-
     /** The person as a label in the index of everything entries are filed under: `@<id>`. */
     val key: String
         get() = PERSON_PREFIX + id
@@ -138,10 +134,7 @@ fun List<JournalPerson>.resolvePeople(
     }.distinctPeople()
 
 /** An entry's spaces and topics, with its people moved out of the tags. */
-data class EntryLabels(val tags: List<String>, val people: List<JournalPerson>) {
-    /** Everything the entry is filed under in the index: tags, then each person as `@<id>`. */
-    val keys: List<String> get() = (tags + people.map { it.key }).distinct()
-}
+data class EntryLabels(val tags: List<String>, val people: List<JournalPerson>)
 
 /**
  * People used to exist twice: as `@name` tags and as the people on an entry. This makes them one.
@@ -176,9 +169,12 @@ fun Journal.withUnifiedPeople(): Journal {
     else copy(tags = unified.tags, people = unified.people)
 }
 
-/** Everything the entry is filed under in the index: its tags plus each person as `@<id>`. */
+/** Everything an entry is filed under in the index: its tags plus each person as `@<id>`. */
+fun labelKeys(tags: List<String>, people: List<JournalPerson>): List<String> = (tags + people.map { it.key }).distinct()
+
+/** Everything the entry is filed under in the index. See [labelKeys]. */
 val Journal.labelKeys: List<String>
-    get() = (tags + people.map { it.key }).distinct()
+    get() = labelKeys(tags, people)
 
 /** `[@Bart](person:<id>)`: a mention of this person in an entry's text. */
 fun JournalPerson.mentionCode(): String = "[${label}](person:$id)"
