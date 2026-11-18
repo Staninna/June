@@ -1,5 +1,7 @@
 package com.denser.june.core.localai
 
+import com.denser.june.core.domain.model.mentionCode
+
 /**
  * Makes model output safe to put into a June entry.
  *
@@ -84,7 +86,7 @@ object OutputValidator {
         val saidAs = mentions.entries.associate { it.key.removePrefix("@").trim().lowercase() to it.value }
         val idsInNotes = mentions.values.toSet()
         val open = LinkedHashMap<String, NameChoice>()
-        fun code(p: CleanupPerson) = "[@${p.name.trim()}](person:${p.id})"
+        fun code(p: CleanupPerson) = mentionCode(p.name, p.id)
 
         /**
          * Who [name] means. A name from the notes is the person it stood for there. A name only one

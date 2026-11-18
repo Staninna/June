@@ -104,6 +104,12 @@ class JournalPersonTest {
     }
 
     @Test
+    fun `the people mentioned in a text are found by id, in order`() {
+        val text = "Met ${mentionCode("Ann", "a1")} and [@Bart]( person : b2 ), then ${mentionCode("Ann", "a1")} again."
+        assertEquals(listOf("a1", "b2", "a1"), mentionedPersonIds(text))
+    }
+
+    @Test
     fun `markdown import turns people tags into people`() {
         val md = "---\ntags:\n  - work\n  - \"@Anna\"\n---\n\nHello"
         val parsed = MarkdownEngine.fromMarkdown(md)

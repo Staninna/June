@@ -26,6 +26,7 @@ import com.denser.june.core.domain.model.JournalPerson
 import com.denser.june.core.domain.model.distinctPeople
 import com.denser.june.core.domain.model.unifyPeople
 import com.denser.june.core.domain.model.renameMentions
+import com.denser.june.core.domain.model.mentionedPersonIds
 import com.denser.june.core.domain.model.resolvePeople
 import com.denser.june.core.localai.CleanupPerson
 import com.denser.june.core.localai.EditedMeanwhile
@@ -234,7 +235,7 @@ class EditorVM(
         replaceBody(if (edits is EditedMeanwhile.Added) edits.keep(rewrite) else rewrite)
         // people the rewrite names are on the entry now
         val known = _state.value.knownPeople
-        val named = MENTIONED_PERSON.findAll(rewrite).mapNotNull { m -> known.firstOrNull { it.id == m.groupValues[1] } }.toList()
+        val named = mentionedPersonIds(rewrite).mapNotNull { id -> known.firstOrNull { it.id == id } }
         if (named.isNotEmpty()) updateState { st -> st.copy(people = named.fold(st.people) { all, person -> all.withPerson(person) }) }
         cleanupSession.clear()
         _cleanupApplied.trySend(Unit)
@@ -1190,4 +1191,3 @@ class EditorVM(
     }
 }
 
-private val MENTIONED_PERSON = Regex("""\]\(\s*person\s*:\s*([^()\n]+?)\s*\)""")

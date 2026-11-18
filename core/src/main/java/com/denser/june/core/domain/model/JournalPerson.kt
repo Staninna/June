@@ -176,10 +176,16 @@ fun labelKeys(tags: List<String>, people: List<JournalPerson>): List<String> = (
 val Journal.labelKeys: List<String>
     get() = labelKeys(tags, people)
 
-/** `[@Bart](person:<id>)`: a mention of this person in an entry's text. */
-fun JournalPerson.mentionCode(): String = "[${label}](person:$id)"
+/** `[@Bart](person:<id>)`: how a mention of a person is written in an entry's text. */
+fun mentionCode(name: String, id: String): String = "[${JournalPerson.PERSON_PREFIX}${name.trim()}](person:$id)"
+
+/** A mention of this person in an entry's text. See [mentionCode]. */
+fun JournalPerson.mentionCode(): String = mentionCode(name, id)
 
 private val MENTION_OF = Regex("""\[@?[^\[\]]*\]\(\s*person\s*:\s*([^()\n]+?)\s*\)""")
+
+/** The ids of the people mentioned in [content], in order of appearance. */
+fun mentionedPersonIds(content: String): List<String> = MENTION_OF.findAll(content).map { it.groupValues[1] }.toList()
 
 /** Rewrites the mentions of [person] in [content] so they show the person's current name. */
 fun renameMentions(content: String, person: JournalPerson): String =
