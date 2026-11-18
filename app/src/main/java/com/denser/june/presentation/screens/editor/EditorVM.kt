@@ -1,16 +1,6 @@
 package com.denser.june.presentation.screens.editor
 
-import com.denser.june.core.R
-import com.denser.june.core.localai.DictationPrompt
 import com.denser.june.core.localai.LocalAiPreferences
-import com.denser.june.core.localai.TextDiff
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.withContext
 
 import android.net.Uri
 import android.util.Patterns
@@ -23,13 +13,9 @@ import com.denser.june.core.domain.repository.SongRepository
 import com.denser.june.core.domain.preferences.JournalPreferences
 import com.denser.june.core.domain.model.Journal
 import com.denser.june.core.domain.model.JournalPerson
-import com.denser.june.core.domain.model.distinctPeople
 import com.denser.june.core.domain.model.unifyPeople
 import com.denser.june.core.domain.model.renameMentions
-import com.denser.june.core.domain.model.mentionedPersonIds
 import com.denser.june.core.domain.model.resolvePeople
-import com.denser.june.core.localai.CleanupPerson
-import com.denser.june.core.localai.EditedMeanwhile
 import com.denser.june.core.domain.model.withPerson
 import com.denser.june.core.domain.model.JournalAudio
 import com.denser.june.core.domain.model.JournalTheme
@@ -112,139 +98,28 @@ class EditorVM(
     private val _uiEvent = Channel<String>()
     val uiEvent = _uiEvent.receiveAsFlow()
 
-    // --- Local AI: "Clean up dictation" ---------------------------------------------------------
-    val isLocalAiEnabled: StateFlow<Boolean> =
-        localAiPrefs.settings.map { it.enabled }.stateIn(viewModelScope, SharingStarted.Eagerly, localAiPrefs.current.enabled)
-
-    /** The review shows the texts as in the entry, or as Markdown. Remembered between cleanups. */
-    val isCleanupReviewFormatted: StateFlow<Boolean> =
-        localAiPrefs.settings.map { it.reviewFormatted }.stateIn(viewModelScope, SharingStarted.Eagerly, localAiPrefs.current.reviewFormatted)
-
-    fun setCleanupReviewFormatted(formatted: Boolean) = localAiPrefs.setReviewFormatted(formatted)
-
-    /** Until the entry has a journal id, its cleanup run is known by this key. */
-    private val draftKey = "draft:" + java.util.UUID.randomUUID()
-    private val cleanupKey: String
-        get() = _state.value.journalId ?: draftKey
-
-    private val myCleanup =
-        combine(cleanupSession.snapshot, _state.map { it.journalId }.distinctUntilChanged()) { snap, id ->
-            snap to (snap.entryKey != null && snap.entryKey == (id ?: draftKey))
+    /** "Clean up dictation" (Local AI) for this entry. */
+    val localAi = EditorCleanup(cleanupSession, localAiPrefs, viewModelScope, object : EditorCleanup.Entry {
+        override val journalId get() = _state.value.journalId
+        override val journalIds = _state.map { it.journalId }
+        override val contents = _state.map { it.content }
+        override val people get() = _state.value.people
+        override val knownPeople get() = _state.value.knownPeople
+        override suspend fun everyone() = journalRepo.getKnownPeople().first()
+        override fun markdown() = currentMarkdown()
+        override fun replaceBody(markdown: String) = this@EditorVM.replaceBody(markdown)
+        override fun addPeople(people: List<JournalPerson>) {
+            if (people.isEmpty()) return
+            updateState { st -> st.copy(people = people.fold(st.people) { all, person -> all.withPerson(person) }) }
         }
-
-    /** What the sheet shows: this entry's run, unless it is minimized. */
-    val cleanup: StateFlow<CleanupUiState> =
-        myCleanup
-            .map { (snap, mine) -> if (mine && !snap.minimized) snap.state else CleanupUiState.Hidden }
-            .stateIn(viewModelScope, SharingStarted.Eagerly, CleanupUiState.Hidden)
-
-    /** What the sparkle button shows while the sheet is put away. */
-    val cleanupIndicator: StateFlow<CleanupIndicator> =
-        myCleanup
-            .map { (snap, mine) ->
-                when {
-                    !snap.isActive -> CleanupIndicator.Idle
-                    !mine -> if (snap.state is CleanupUiState.Working) CleanupIndicator.BusyElsewhere else CleanupIndicator.Idle
-                    else ->
-                        when (val st = snap.state) {
-                            is CleanupUiState.Working -> CleanupIndicator.Working(st.progress)
-                            is CleanupUiState.Review -> CleanupIndicator.Ready
-                            is CleanupUiState.Problem -> CleanupIndicator.Problem
-                            CleanupUiState.Hidden -> CleanupIndicator.Idle
-                        }
-                }
-            }
-            .stateIn(viewModelScope, SharingStarted.Eagerly, CleanupIndicator.Idle)
-
-    /** Emits once when this entry's rewrite arrives while the sheet is minimized. */
-    private val _cleanupReady = Channel<Unit>(Channel.CONFLATED)
-    val cleanupReady = _cleanupReady.receiveAsFlow()
-
-    /** Emits once after a rewrite was applied, so the screen can offer Undo. */
-    private val _cleanupApplied = Channel<Unit>(Channel.CONFLATED)
-    val cleanupApplied = _cleanupApplied.receiveAsFlow()
-
-    private var contentBeforeCleanup: String? = null
+        override fun say(message: Int) {
+            viewModelScope.launch { _uiEvent.send(context.getString(message)) }
+        }
+    })
 
     private fun currentMarkdown(): String {
         val s = _state.value
         return if (s.isMarkdownEnabled && hyphenState.text.isNotEmpty()) hyphenState.toMarkdown() else s.content
-    }
-
-    /** The sparkle button: opens the run of this entry if there is one, otherwise starts one. */
-    fun startCleanup() {
-        val snap = cleanupSession.snapshot.value
-        if (snap.isActive && snap.entryKey == cleanupKey) {
-            cleanupSession.expand()
-            return
-        }
-        if (snap.state is CleanupUiState.Working) {
-            viewModelScope.launch { _uiEvent.send(context.getString(R.string.cleanup_busy_elsewhere)) }
-            return
-        }
-        runCleanup()
-    }
-
-    private fun runCleanup() {
-        val body = currentMarkdown()
-        if (body.isBlank()) {
-            viewModelScope.launch { _uiEvent.send(context.getString(R.string.cleanup_empty_body)) }
-            return
-        }
-        val entryPeople = _state.value.people
-        cleanupSession.start(cleanupKey, canOpenEntry = _state.value.journalId != null, body = body) {
-            // the people on this entry first: a name several people share most likely means them
-            (entryPeople + journalRepo.getKnownPeople().first()).distinctPeople().map { person ->
-                CleanupPerson(person.id, person.name, person.note, onEntry = entryPeople.any { it.id == person.id }, color = person.color,
-                    shape = person.shape, contactLookupKey = person.contactLookupKey)
-            }
-        }
-    }
-
-    fun retryCleanup() = runCleanup()
-
-    /** Answers who a name several people share means in the rewrite. Null: nobody's mention. */
-    fun pickCleanupPerson(key: String, personId: String?) = cleanupSession.pick(key, personId)
-
-    fun cancelCleanup() = cleanupSession.cancel()
-
-    /** Puts the sheet away. The run carries on and shows on the sparkle button. */
-    fun minimizeCleanup() = cleanupSession.minimize()
-
-    /** What was written in this entry since its cleanup started. */
-    fun editedDuringCleanup(): EditedMeanwhile {
-        val snap = cleanupSession.snapshot.value
-        val source = snap.source?.takeIf { snap.entryKey == cleanupKey } ?: return EditedMeanwhile.No
-        return EditedMeanwhile.of(source, currentMarkdown())
-    }
-
-    /** Emits a line to show when the user starts writing in an entry that is being cleaned up. */
-    private val _cleanupNotice = Channel<Int>(Channel.CONFLATED)
-    val cleanupNotice = _cleanupNotice.receiveAsFlow()
-
-    /** Replaces the body with the reviewed rewrite. The only place where Local AI changes an entry. */
-    fun acceptCleanup() {
-        val snap = cleanupSession.snapshot.value
-        val review = snap.state as? CleanupUiState.Review ?: return
-        if (snap.entryKey != cleanupKey) return
-        // Undo goes back to what is in the editor now, which may be newer than what was cleaned up
-        // text added while the cleanup ran is not in the rewrite: it stays, after it
-        val edits = editedDuringCleanup()
-        contentBeforeCleanup = currentMarkdown()
-        val rewrite = review.settled
-        replaceBody(if (edits is EditedMeanwhile.Added) edits.keep(rewrite) else rewrite)
-        // people the rewrite names are on the entry now
-        val known = _state.value.knownPeople
-        val named = mentionedPersonIds(rewrite).mapNotNull { id -> known.firstOrNull { it.id == id } }
-        if (named.isNotEmpty()) updateState { st -> st.copy(people = named.fold(st.people) { all, person -> all.withPerson(person) }) }
-        cleanupSession.clear()
-        _cleanupApplied.trySend(Unit)
-    }
-
-    fun undoCleanup() {
-        val previous = contentBeforeCleanup ?: return
-        contentBeforeCleanup = null
-        replaceBody(previous)
     }
 
     private fun replaceBody(markdown: String) {
@@ -259,42 +134,6 @@ class EditorVM(
     )
 
     init {
-        cleanupSession.editorShown(cleanupKey)
-        viewModelScope.launch {
-            // an unsaved entry gets its id when it is first saved: its run moves with it
-            _state.map { it.journalId }.distinctUntilChanged().collect { id ->
-                if (id != null) cleanupSession.rebind(draftKey, id)
-                cleanupSession.editorShown(cleanupKey)
-            }
-        }
-        viewModelScope.launch {
-            // Writing on while a cleanup runs is fine, but the rewrite will not have that text.
-            // Say once per run what happens to it, the moment it matters.
-            var toldFor: Pair<String?, EditedMeanwhile>? = null
-            _state.map { it.content }.distinctUntilChanged().collect {
-                val snap = cleanupSession.snapshot.value
-                if (snap.entryKey != cleanupKey || snap.state !is CleanupUiState.Working) return@collect
-                val kind = when (editedDuringCleanup()) {
-                    is EditedMeanwhile.Added -> EditedMeanwhile.Added("", false)
-                    EditedMeanwhile.Changed -> EditedMeanwhile.Changed
-                    EditedMeanwhile.No -> return@collect
-                }
-                if (toldFor == snap.source to kind) return@collect
-                // once it is known the earlier text changed, "your new text is kept" is no longer true
-                if (kind is EditedMeanwhile.Added && toldFor == snap.source to EditedMeanwhile.Changed) return@collect
-                toldFor = snap.source to kind
-                _cleanupNotice.trySend(
-                    if (kind is EditedMeanwhile.Added) R.string.cleanup_notice_added else R.string.cleanup_notice_changed
-                )
-            }
-        }
-        viewModelScope.launch {
-            var wasWorking = false
-            cleanupIndicator.collect { indicator ->
-                if (wasWorking && indicator == CleanupIndicator.Ready) _cleanupReady.trySend(Unit)
-                wasWorking = indicator is CleanupIndicator.Working
-            }
-        }
         viewModelScope.launch {
             journalPrefs.startOfWeek().collect { startDay ->
                 _state.update { it.copy(startOfWeek = startDay) }
@@ -1183,8 +1022,7 @@ class EditorVM(
 
     override fun onCleared() {
         super.onCleared()
-        // the cleanup is not tied to this screen: it carries on, minimized
-        cleanupSession.editorGone(cleanupKey)
+        localAi.editorGone()
         if (_state.value.isDirty && !_state.value.isDraft) {
             discardChanges()
         }

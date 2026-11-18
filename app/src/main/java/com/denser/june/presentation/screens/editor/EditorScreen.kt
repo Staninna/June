@@ -1,12 +1,7 @@
 package com.denser.june.presentation.screens.editor
 
-import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.SnackbarResult
-import com.denser.june.presentation.screens.editor.components.dialogs.CleanupReviewSheet
-import com.denser.june.presentation.screens.settings.localai.LocalAiVM
-import org.koin.compose.koinInject
 
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
@@ -57,6 +52,7 @@ import com.denser.june.presentation.theme.FontPresets
 import com.denser.june.presentation.components.color.ColorTab
 import com.denser.june.presentation.theme.getJournalFontFamily
 import com.denser.june.presentation.utils.UiUtils
+import org.koin.compose.koinInject
 import org.koin.compose.viewmodel.koinViewModel
 import java.time.LocalTime
 
@@ -72,11 +68,8 @@ fun EditorScreen(
 
     val navigator = koinInject<AppNavigator>()
     val state by viewModel.state.collectAsStateWithLifecycle()
-    val isLocalAiEnabled by viewModel.isLocalAiEnabled.collectAsStateWithLifecycle()
-    val cleanupState by viewModel.cleanup.collectAsStateWithLifecycle()
-    val cleanupReviewFormatted by viewModel.isCleanupReviewFormatted.collectAsStateWithLifecycle()
-    val cleanupIndicator by viewModel.cleanupIndicator.collectAsStateWithLifecycle()
-    val haptics = androidx.compose.ui.platform.LocalHapticFeedback.current
+    val isLocalAiEnabled by viewModel.localAi.isEnabled.collectAsStateWithLifecycle()
+    val cleanupIndicator by viewModel.localAi.indicator.collectAsStateWithLifecycle()
     val cleanupSnackbar = remember { SnackbarHostState() }
     val isMarkdownEnabled = state.isMarkdownEnabled
     val isKeyboardAutocorrectEnabled = state.isKeyboardAutocorrectEnabled
@@ -158,40 +151,10 @@ fun EditorScreen(
         }
     }
 
-    LaunchedEffect(Unit) {
-        // the rewrite arrived while the sheet was put away: a nudge, not an interruption
-        viewModel.cleanupReady.collect {
-            haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
-            val result = cleanupSnackbar.showSnackbar(
-                message = context.getString(R.string.cleanup_ready),
-                actionLabel = context.getString(R.string.cleanup_review_action),
-                withDismissAction = true,
-                duration = SnackbarDuration.Long
-            )
-            if (result == SnackbarResult.ActionPerformed) {
-                keyboardController?.hide()
-                viewModel.startCleanup()
-            }
-        }
-    }
-
-    LaunchedEffect(Unit) {
-        viewModel.cleanupNotice.collect { message ->
-            cleanupSnackbar.showSnackbar(message = context.getString(message), withDismissAction = true)
-        }
-    }
-
-    LaunchedEffect(Unit) {
-        viewModel.cleanupApplied.collect {
-            val result = cleanupSnackbar.showSnackbar(
-                message = context.getString(R.string.cleanup_applied),
-                actionLabel = context.getString(R.string.cleanup_undo),
-                withDismissAction = true,
-                duration = SnackbarDuration.Long
-            )
-            if (result == SnackbarResult.ActionPerformed) viewModel.undoCleanup()
-        }
-    }
+    EditorCleanupSnackbars(viewModel.localAi, cleanupSnackbar, onReview = {
+        keyboardController?.hide()
+        viewModel.localAi.start()
+    })
 
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         viewModel.onAction(EditorAction.Refresh)
@@ -279,7 +242,7 @@ fun EditorScreen(
                     onCleanupClick = {
                         keyboardController?.hide()
                         focusManager.clearFocus(force = true)
-                        viewModel.startCleanup()
+                        viewModel.localAi.start()
                     },
                     onCloseClick = {
                         if (isFontMode) isFontMode = false
@@ -627,22 +590,11 @@ fun EditorScreen(
         }
         }
 
-        CleanupReviewSheet(
-            state = cleanupState,
-            onAccept = viewModel::acceptCleanup,
-            onRetry = viewModel::retryCleanup,
-            onCancel = viewModel::cancelCleanup,
-            onMinimize = viewModel::minimizeCleanup,
-            edits = remember(cleanupState, state.content) { viewModel.editedDuringCleanup() },
-            onOpenServer = LocalAiVM.serverLaunchIntent(context)?.let { intent -> { context.startActivity(intent) } },
-            onOpenSettings = {
-                viewModel.cancelCleanup()
-                navigator.navigateTo(Route.LocalAiSettings)
-            },
-            onPickPerson = viewModel::pickCleanupPerson,
-            formatted = cleanupReviewFormatted,
-            onFormattedChange = viewModel::setCleanupReviewFormatted,
+        EditorCleanupSheet(
+            cleanup = viewModel.localAi,
+            content = state.content,
             fontFamily = getJournalFontFamily(fontName = state.font, variation = state.fontVariation),
+            onOpenSettings = { navigator.navigateTo(Route.LocalAiSettings) },
         )
 
         EditorModals(
