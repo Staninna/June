@@ -23,6 +23,8 @@ import java.util.UUID
 class DictationCleanup(
     private val client: LocalAiClient,
     private val prefs: LocalAiStore,
+    /** Starts a stopped server (docs/LOCAL_LLM_API.md §3.5). */
+    private val wake: suspend () -> ServerWake.Result = { ServerWake.Result.Unavailable },
 ) {
     sealed interface Outcome {
         /** @param choices names in [rewrite] that several people share, still to be answered. */
@@ -108,13 +110,14 @@ class DictationCleanup(
             s.pendingJobId?.takeIf { s.pendingJobFingerprint == fingerprint }
                 ?: newRequestId().also { prefs.setPendingJob(it, fingerprint) }
         var onServer = false
+        val waker = Waker(baseUrl)
         try {
             var bound: Int? = maxTokens(notes)
             var restarts = 0
             while (true) {
                 onProgress(Progress(Phase.Sending, expectedTokens = expected))
                 val submission =
-                    when (val submitted = submit(baseUrl, token, prompt, notes, bound, requestId)) {
+                    when (val submitted = submit(baseUrl, token, prompt, notes, bound, requestId, waker)) {
                         is LocalAiResult.Ok -> submitted.value
                         LocalAiResult.TooLong ->
                             if (bound != null) {
@@ -131,7 +134,7 @@ class DictationCleanup(
                         return finish(Ended.Text(submission.completion), body, people, baseUrl, token, null, simple)
                     is LocalAiSubmission.Accepted -> {
                         onServer = true
-                        when (val followed = follow(baseUrl, token, requestId, expected, onProgress, submission.job)) {
+                        when (val followed = follow(baseUrl, token, requestId, expected, onProgress, waker, submission.job)) {
                             is Followed.Ended -> return finish(followed.outcome, body, people, baseUrl, token, requestId, simple)
                             // the server lost the job (its data was cleared): the same id starts it again
                             Followed.Lost ->
@@ -160,12 +163,44 @@ class DictationCleanup(
         body: String,
         maxTokens: Int?,
         requestId: String,
+        waker: Waker,
     ): LocalAiResult<LocalAiSubmission> {
         var attempt = 0
         while (true) {
             val r = client.submitCleanup(baseUrl, token, prompt, body, maxTokens, requestId)
+            if (r == LocalAiResult.Unreachable) {
+                // nothing listens: start the server and post again, once
+                if (waker.tried) return r
+                waker.wake()?.let { return it }
+                continue
+            }
             if (r != LocalAiResult.TimedOut || ++attempt >= MAX_SUBMIT_ATTEMPTS) return r
             delay(RETRY_DELAY_MS)
+        }
+    }
+
+    /** Starts a stopped server at most once per cleanup. */
+    private inner class Waker(private val baseUrl: String) {
+        var tried = false
+            private set
+
+        /** Null when the server answers now, otherwise the result to report. */
+        suspend fun wake(): LocalAiResult<Nothing>? {
+            tried = true
+            return when (this@DictationCleanup.wake()) {
+                ServerWake.Result.Started -> if (waitForServer()) null else LocalAiResult.Unreachable
+                ServerWake.Result.NotPaired -> LocalAiResult.Unauthorized
+                ServerWake.Result.NoModel -> LocalAiResult.NoModel
+                ServerWake.Result.NotAllowed, ServerWake.Result.Unavailable -> LocalAiResult.Unreachable
+            }
+        }
+
+        private suspend fun waitForServer(): Boolean {
+            repeat(WAKE_POLLS) {
+                if (client.health(baseUrl) is LocalAiResult.Ok) return true
+                delay(WAKE_POLL_MS)
+            }
+            return false
         }
     }
 
@@ -190,6 +225,7 @@ class DictationCleanup(
         id: String,
         expected: Int,
         onProgress: (Progress) -> Unit,
+        waker: Waker,
         first: LocalAiJob? = null,
     ): Followed {
         first?.let { onProgress(progressOf(it, expected)) }
@@ -216,6 +252,13 @@ class DictationCleanup(
                 LocalAiResult.Unreachable -> {
                     // Nothing listens on the port: the server app was stopped or killed. The job is
                     // on its disk and continues when it runs again, so the id is kept.
+                    if (!waker.tried) {
+                        when (waker.wake()) {
+                            null -> continue
+                            LocalAiResult.Unauthorized -> return Followed.Ended(Ended.Problem(Outcome.NotPaired))
+                            else -> Unit
+                        }
+                    }
                     if (++refused >= MAX_REFUSED) {
                         return Followed.Ended(Ended.Problem(Outcome.ServerUnavailable, keepJob = true))
                     }
@@ -312,6 +355,9 @@ class DictationCleanup(
         private const val MAX_RESTARTS = 2
         private const val RETRY_DELAY_MS = 1_500L
         private const val CANCEL_TIMEOUT_MS = 4_000L
+        // after a wake the server listens within a second or two
+        private const val WAKE_POLLS = 20
+        private const val WAKE_POLL_MS = 500L
 
         /** A rewrite is about as long as the notes; a token is roughly three characters. */
         fun expectedTokens(body: String): Int = (body.length / 3).coerceAtLeast(16)

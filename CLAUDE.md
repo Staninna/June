@@ -11,6 +11,9 @@ to work safely.
 - `origin` is the fork (Staninna/June), `upstream` is the original (DenserMeerkat/June).
 - `my-main` holds all fork work and is the GitHub default branch. `main` mirrors `upstream/main`.
 - Install mode: replace. The fork keeps upstream's application ID (`com.denser.june`).
+- Local AI talks to the SmolChat Server fork (`../SmolChat`). Its contract lives only in that
+  repository, `docs/LOCAL_LLM_API.md`; June's copy is a link. Change the contract there.
+- Debug builds include x86_64, so they run on the emulator. Releases stay arm64 only.
 - Release build: `:app:assembleFossRelease` (FOSS flavor, JDK 17). Upstream's own release workflows
   are disabled on the fork; `.github/workflows/release.yml` is the only release path.
 

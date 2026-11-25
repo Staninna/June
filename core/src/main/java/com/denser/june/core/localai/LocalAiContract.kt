@@ -6,11 +6,11 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 
 /**
- * Client side of docs/LOCAL_LLM_API.md (contract v2). The server is the SmolChat fork
- * ("SmolChat Server"); keep this file in sync with the contract in both repositories.
+ * Client side of the Local LLM API, contract v3. The server is the SmolChat fork
+ * ("SmolChat Server"), whose repository holds the contract (docs/LOCAL_LLM_API.md links to it).
  */
 object LocalAiContract {
-    const val API_VERSION = 2
+    const val API_VERSION = 3
     const val SERVER_PACKAGE = "io.shubham0204.smollmandroid"
     const val ACTION_PAIR = "$SERVER_PACKAGE.action.PAIR"
     const val EXTRA_CLIENT_NAME = "client_name"

@@ -159,6 +159,8 @@ val revenueCatApiKey = (localProperties["REVENUECAT_API_KEY"] ?: System.getenv("
             applicationIdSuffix = ".debug"
             resValue("string", "app_name", appName)
             versionNameSuffix = "-dev"
+            // debug builds also run on the x86_64 emulator; releases stay arm64 only
+            if (!enableAbiSplits) ndk { abiFilters += "x86_64" }
         }
     }
 

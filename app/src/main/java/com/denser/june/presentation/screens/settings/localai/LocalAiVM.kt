@@ -12,7 +12,9 @@ import com.denser.june.core.localai.LocalAiContract
 import com.denser.june.core.localai.LocalAiPreferences
 import com.denser.june.core.localai.LocalAiResult
 import com.denser.june.core.localai.LocalAiSettings
+import com.denser.june.core.localai.ServerWake
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -85,6 +87,28 @@ class LocalAiVM(
                         LocalAiResult.Unreachable -> LocalAiStatus.NotRunning
                         else -> LocalAiStatus.Ready(health.value.model)
                     }
+            }
+    }
+
+    /** Starts the server without leaving June (docs/LOCAL_LLM_API.md §3.5), then checks again. */
+    fun startServer() {
+        checkJob?.cancel()
+        _status.value = LocalAiStatus.Checking
+        checkJob =
+            viewModelScope.launch {
+                when (ServerWake.wake(context, prefs.current.serverPackage)) {
+                    ServerWake.Result.Started -> {
+                        val baseUrl = prefs.current.baseUrl ?: DEFAULT_BASE_URL
+                        for (attempt in 0 until 20) {
+                            if (client.health(baseUrl) is LocalAiResult.Ok) break
+                            delay(500)
+                        }
+                        refresh()
+                    }
+                    ServerWake.Result.NotPaired -> _status.value = LocalAiStatus.NotPaired
+                    ServerWake.Result.NoModel -> _status.value = LocalAiStatus.NoModel
+                    ServerWake.Result.NotAllowed, ServerWake.Result.Unavailable -> _status.value = LocalAiStatus.NotRunning
+                }
             }
     }
 

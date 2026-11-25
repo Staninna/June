@@ -133,6 +133,7 @@ fun LocalAiSettingsScreen(viewModel: LocalAiVM = koinViewModel()) {
                         status = status,
                         onPair = pair,
                         onOpenServer = openServer,
+                        onStartServer = viewModel::startServer,
                         onRefresh = viewModel::refresh,
                     )
                 }
@@ -221,6 +222,7 @@ private fun StatusCard(
     status: LocalAiStatus,
     onPair: () -> Unit,
     onOpenServer: () -> Unit,
+    onStartServer: () -> Unit,
     onRefresh: () -> Unit,
 ) {
     val scheme = MaterialTheme.colorScheme
@@ -304,7 +306,13 @@ private fun StatusCard(
                     when (status) {
                         LocalAiStatus.NotPaired -> Button(onClick = onPair, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.local_ai_pair)) }
                         LocalAiStatus.Revoked -> Button(onClick = onPair, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.local_ai_pair_again)) }
-                        LocalAiStatus.NotRunning, LocalAiStatus.NoModel -> {
+                        LocalAiStatus.NotRunning -> {
+                            TextButton(onClick = onOpenServer) { Text(stringResource(R.string.local_ai_open_server)) }
+                            Button(onClick = onStartServer, modifier = Modifier.heightIn(min = 48.dp)) {
+                                Text(stringResource(R.string.local_ai_start_server))
+                            }
+                        }
+                        LocalAiStatus.NoModel -> {
                             TextButton(onClick = onRefresh) { Text(stringResource(R.string.local_ai_refresh)) }
                             Button(onClick = onOpenServer, modifier = Modifier.heightIn(min = 48.dp)) {
                                 Icon(painterResource(R.drawable.open_in_new_24px), contentDescription = null, modifier = Modifier.size(18.dp))

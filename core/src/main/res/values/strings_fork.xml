@@ -105,7 +105,7 @@
     <string name="local_ai_status_not_installed">Server app not installed</string>
     <string name="local_ai_status_not_installed_desc">Install SmolChat Server, the on-device model server, to use Local AI.</string>
     <string name="local_ai_status_not_running">Server not running</string>
-    <string name="local_ai_status_not_running_desc">Open the server app and start it. On GrapheneOS, June also needs the Network permission (localhost counts as network).</string>
+    <string name="local_ai_status_not_running_desc">June starts it when it needs it. If that fails, open the server app and start it there. On GrapheneOS, June also needs the Network permission (localhost counts as network).</string>
     <string name="local_ai_status_not_paired">Not paired</string>
     <string name="local_ai_status_not_paired_desc">Pair June with the server app to let it use your local model.</string>
     <string name="local_ai_status_revoked">Access was revoked</string>
@@ -116,6 +116,7 @@
     <string name="local_ai_pair_again">Pair again</string>
     <string name="local_ai_unpair">Forget pairing</string>
     <string name="local_ai_open_server">Open server app</string>
+    <string name="local_ai_start_server">Start server</string>
     <string name="local_ai_refresh">Check again</string>
     <string name="local_ai_paired_toast">Paired with the server</string>
     <string name="local_ai_pair_cancelled">Pairing was not allowed</string>

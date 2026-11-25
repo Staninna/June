@@ -56,6 +56,7 @@ import org.koin.core.module.dsl.singleOf
 import com.denser.june.core.localai.DictationCleanup
 import com.denser.june.core.localai.LocalAiClient
 import com.denser.june.core.localai.LocalAiPreferences
+import com.denser.june.core.localai.ServerWake
 import org.koin.core.qualifier.named
 import android.content.Context
 import com.denser.june.core.data.remote.InternetInterceptor
@@ -96,7 +97,11 @@ val coreModule = module {
     // "Internet access" switch (which blocks real network traffic) does not apply to on-device calls.
     single { LocalAiPreferences(get()) }
     single { LocalAiClient() }
-    single { DictationCleanup(get(), get<LocalAiPreferences>()) }
+    single {
+        val prefs = get<LocalAiPreferences>()
+        val context = get<Context>()
+        DictationCleanup(get(), prefs) { ServerWake.wake(context, prefs.current.serverPackage) }
+    }
 
     single {
         val dispatcher = okhttp3.Dispatcher().apply {

@@ -25,8 +25,11 @@ import kotlin.concurrent.thread
 class DictationCleanupTest {
 
     /** Answers each request with what [handler] returns: status line code and JSON body. */
-    private class TinyServer(private val handler: (method: String, path: String, body: String) -> Pair<Int, String>) {
-        private val socket = ServerSocket(0)
+    private class TinyServer(
+        port: Int = 0,
+        private val handler: (method: String, path: String, body: String) -> Pair<Int, String>,
+    ) {
+        private val socket = ServerSocket(port)
         val baseUrl = "http://127.0.0.1:${socket.localPort}"
         val requests = CopyOnWriteArrayList<String>()
 
@@ -192,6 +195,42 @@ class DictationCleanupTest {
         assertEquals("posted again after the server lost the job", 2, posts.size)
         val ids = posts.map { Regex("\"request_id\":\"([0-9a-f-]{36})\"").find(it)!!.groupValues[1] }
         assertEquals(ids[0], ids[1])
+    }
+
+    @Test
+    fun `a stopped server is woken once and the cleanup goes on`() = runBlocking {
+        val port = ServerSocket(0).use { it.localPort }
+        val store = Store(LocalAiSettings(enabled = true, token = "sk-local-test", baseUrl = "http://127.0.0.1:$port"))
+        var wakes = 0
+        val cleanup =
+            DictationCleanup(LocalAiClient(), store) {
+                wakes++
+                server =
+                    TinyServer(port) { _, path, _ ->
+                        if (path == "/health") 200 to """{"status":"ok"}"""
+                        else 200 to job("completed", ""","response":${completion("Awake.")}""")
+                    }
+                ServerWake.Result.Started
+            }
+        val outcome = cleanup.run(body, emptyList())
+        assertEquals("Awake.", (outcome as DictationCleanup.Outcome.Rewrite).rewrite)
+        assertEquals(1, wakes)
+    }
+
+    @Test
+    fun `a wake that is refused is reported and not tried again`() = runBlocking {
+        val port = ServerSocket(0).use { it.localPort }
+        val store = Store(LocalAiSettings(enabled = true, token = "sk-local-test", baseUrl = "http://127.0.0.1:$port"))
+        for ((result, expected) in listOf(
+            ServerWake.Result.NotPaired to DictationCleanup.Outcome.NotPaired,
+            ServerWake.Result.NoModel to DictationCleanup.Outcome.NoModel,
+            ServerWake.Result.NotAllowed to DictationCleanup.Outcome.ServerUnavailable,
+        )) {
+            var wakes = 0
+            val outcome = DictationCleanup(LocalAiClient(), store) { wakes++; result }.run(body, emptyList())
+            assertEquals(expected, outcome)
+            assertEquals(1, wakes)
+        }
     }
 
     @Test
