@@ -3,4 +3,6 @@
 <full-backup-content>
     <!-- Local AI pairing token: must never leave the device. -->
     <exclude domain="sharedpref" path="local_ai.xml" />
+    <exclude domain="sharedpref" path="june_reminder_alarms.xml" />
+    <exclude domain="file" path="sync" />
 </full-backup-content>

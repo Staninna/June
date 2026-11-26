@@ -1,10 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Seedvault reads <device-transfer>. Both sections hold the same excludes; everything else
+     (journal database, settings, photos, videos, recordings, songs) is backed up. -->
 <data-extraction-rules>
     <cloud-backup>
         <!-- Local AI pairing token: must never leave the device. -->
         <exclude domain="sharedpref" path="local_ai.xml" />
+        <!-- Which alarms are set on this phone. June sets them again on start. -->
+        <exclude domain="sharedpref" path="june_reminder_alarms.xml" />
+        <!-- Sync hash cache, keyed by file path and modification time. Rebuilt when needed. -->
+        <exclude domain="file" path="sync" />
     </cloud-backup>
     <device-transfer>
         <exclude domain="sharedpref" path="local_ai.xml" />
+        <exclude domain="sharedpref" path="june_reminder_alarms.xml" />
+        <exclude domain="file" path="sync" />
     </device-transfer>
 </data-extraction-rules>

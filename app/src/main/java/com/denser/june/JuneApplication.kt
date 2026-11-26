@@ -3,6 +3,8 @@ package com.denser.june
 import android.app.Application
 import coil.ImageLoader
 import coil.ImageLoaderFactory
+import com.denser.june.core.domain.preferences.JournalPreferences
+import com.denser.june.core.domain.reminder.ReminderScheduler
 import com.denser.june.core.domain.repository.JournalRepository
 import com.denser.june.core.media.storage.AudioStorageManager
 import com.denser.june.core.media.storage.MediaStorageManager
@@ -27,6 +29,8 @@ class JuneApplication : Application(), ImageLoaderFactory {
     private val journalRepo: JournalRepository by inject()
     private val songRepo: com.denser.june.core.domain.repository.SongRepository by inject()
     private val imageLoader: ImageLoader by inject()
+    private val journalPreferences: JournalPreferences by inject()
+    private val reminderScheduler: ReminderScheduler by inject()
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun newImageLoader(): ImageLoader = imageLoader
@@ -43,7 +47,22 @@ class JuneApplication : Application(), ImageLoaderFactory {
         initializePurchases(this)
 
         NotificationsHelper(this).createNotificationChannel()
+        rescheduleReminders()
         cleanupStorage()
+    }
+
+    /** Alarms are not part of a backup, so after a restore they only come back once June sets them again. */
+    private fun rescheduleReminders() {
+        appScope.launch {
+            try {
+                reminderScheduler.sync(
+                    masterEnabled = journalPreferences.isReminderEnabled().first(),
+                    slots = journalPreferences.reminderSlots().first()
+                )
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
     }
 
     private fun cleanupStorage() {
